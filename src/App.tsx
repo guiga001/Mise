@@ -68,6 +68,7 @@ export default function App() {
           <DashboardTab
             database={database}
             onNavigate={(tab) => setActiveTab(tab)}
+            onUpdateDatabase={handleUpdateDatabase}
           />
         )}
         {activeTab === 'recipes' && (

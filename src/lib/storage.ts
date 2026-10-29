@@ -21,6 +21,7 @@ import {
   Store,
   Supplier,
   User,
+  StockLot,
 } from '../domain/types';
 
 export interface MiseDatabaseState {
@@ -42,6 +43,9 @@ export interface MiseDatabaseState {
   auditLogs: AuditLog[];
   alerts: Alert[];
   productNameToRecipeIdMap: Record<string, string>;
+  stockLots?: StockLot[];
+  valueEvents?: any[];
+  dailyTasks?: any[];
 }
 
 const STORAGE_KEY = 'mise_database_state_v1';
@@ -69,6 +73,9 @@ function createEmptyDatabase(): MiseDatabaseState {
     auditLogs: [],
     alerts: [],
     productNameToRecipeIdMap: {},
+    stockLots: [],
+    valueEvents: [],
+    dailyTasks: [],
   };
 }
 

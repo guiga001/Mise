@@ -25,6 +25,10 @@ import { parseSalesCsvText, processSalesAndDeductStock, computeContentHash } fro
 import { MiseDatabaseState, appendAuditLog } from '../lib/storage';
 import { Modal } from './Modal';
 import { EmptyState } from './EmptyState';
+import { calculateUncostedRevenue, calculateChannelMargins, calculateDailySalesGoal } from '../domain/sales-intelligence';
+import { matchProductToRecipes } from '../domain/similarity';
+import { ExplanationModal, HowWeCalculatedButton } from './ExplanationModal';
+import { Target, HelpCircle, Check, Link2 } from 'lucide-react';
 
 interface SalesTabProps {
   database: MiseDatabaseState;
@@ -58,9 +62,73 @@ export const SalesTab: React.FC<SalesTabProps> = ({
   const [csvChannel, setCsvChannel] = useState('iFood Delivery');
   const [csvPreviewRows, setCsvPreviewRows] = useState<any[]>([]);
   const [csvError, setCsvError] = useState('');
+  const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
+  const [selectedExplanation, setSelectedExplanation] = useState<{ title: string; explanation: any } | null>(null);
 
   const ingredientsMap = useMemo(() => new Map(ingredients.map(i => [i.id, i])), [ingredients]);
   const recipesMap = useMemo(() => new Map(recipes.map(r => [r.id, r])), [recipes]);
+
+  // F08: Receita sem custo
+  const uncostedReport = useMemo(() => {
+    return calculateUncostedRevenue(salesImports, recipesMap, database.productNameToRecipeIdMap || {});
+  }, [salesImports, recipesMap, database.productNameToRecipeIdMap]);
+
+  // F25: Margem líquida real por canal
+  const channelReport = useMemo(() => {
+    return calculateChannelMargins(salesImports, recipesMap, ingredientsMap);
+  }, [salesImports, recipesMap, ingredientsMap]);
+
+  // F43: Sugestões de similaridade para itens sem mapeamento
+  const mappingSuggestions = useMemo(() => {
+    const candidates = recipes.map(r => ({ id: r.id, name: r.name }));
+    const result: { externalName: string; matches: any[] }[] = [];
+    for (const item of uncostedReport.problematicItems) {
+      if (item.reason === 'SEM_MAPEAMENTO') {
+        const matches = matchProductToRecipes(item.externalProductName, candidates);
+        result.push({
+          externalName: item.externalProductName,
+          matches,
+        });
+      }
+    }
+    return result;
+  }, [uncostedReport.problematicItems, recipes]);
+
+  const handleApplyMapping = (externalName: string, recipeId: string) => {
+    const updatedMap = {
+      ...(database.productNameToRecipeIdMap || {}),
+      [externalName]: recipeId,
+    };
+
+    // Atualizar também retrospectivamente os imports de vendas
+    const updatedSales = database.salesImports.map((imp) => ({
+      ...imp,
+      lines: imp.lines.map((line) =>
+        line.externalProductName === externalName ? { ...line, mappedRecipeId: recipeId } : line
+      ),
+    }));
+
+    const newState: MiseDatabaseState = {
+      ...database,
+      productNameToRecipeIdMap: updatedMap,
+      salesImports: updatedSales,
+      auditLogs: [
+        ...database.auditLogs,
+        {
+          id: `aud_${Date.now()}`,
+          action: 'MAP_RECIPE_SIMILARITY',
+          entityType: 'Recipe',
+          entityId: recipeId,
+          userId: database.activeUserId || 'dono',
+          userName: 'Dono/Gestor',
+          details: `Item de venda "${externalName}" mapeado para a Ficha Técnica ID "${recipeId}" via similaridade determinística (F43).`,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    };
+
+    onUpdateDatabase(newState);
+  };
 
   // Atualiza preço sugerido automaticamente quando seleciona uma receita
   const handleSelectRecipe = (recipeId: string) => {
@@ -345,6 +413,82 @@ export const SalesTab: React.FC<SalesTabProps> = ({
         </div>
       </div>
 
+      {/* F08 Alerta de Receita Sem Custo */}
+      {uncostedReport.totalUncostedRevenueInCents > 0 && (
+        <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center text-amber-800">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-bold text-amber-900">
+                  F08 · Receita Sem Custo (Custos Ocultos)
+                </h4>
+                <span className="text-[10px] bg-amber-200/80 text-amber-900 font-mono font-bold px-1.5 py-0.5 rounded">
+                  {uncostedReport.uncostedPercentage}% do faturamento
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 mt-0.5">
+                {formatCentsToCurrency(uncostedReport.totalUncostedRevenueInCents)} em vendas veio de itens sem ficha técnica vinculada. O estoque não está sendo baixado para estes itens.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <HowWeCalculatedButton
+              onClick={() => setSelectedExplanation({ title: 'Receita Sem Custo (F08)', explanation: uncostedReport.explanation })}
+            />
+            {mappingSuggestions.length > 0 && (
+              <button
+                onClick={() => setIsMappingModalOpen(true)}
+                className="px-3 py-1.5 bg-amber-900 hover:bg-stone-900 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>Mapear com 1 Clique (F43)</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* F25 Margem Líquida Real por Canal */}
+      {channelReport.channels.length > 0 && (
+        <div className="bg-white rounded-xl border border-stone-200/80 p-5 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-stone-100">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                F25 · Margem Líquida Real por Canal
+              </span>
+              <span className="text-xs text-stone-400">· {channelReport.channels.length} canais ativos</span>
+            </div>
+            <HowWeCalculatedButton
+              onClick={() => setSelectedExplanation({ title: 'Margem por Canal (F25)', explanation: channelReport.explanation })}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {channelReport.channels.map((ch) => (
+              <div key={ch.channel} className="p-3 bg-stone-50 rounded-xl border border-stone-200/60 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-stone-900">{ch.channel}</span>
+                  <span className={`font-mono font-bold ${ch.netMarginPercentage >= 30 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {ch.netMarginPercentage}% margem
+                  </span>
+                </div>
+                <div className="text-stone-500 flex justify-between text-[11px]">
+                  <span>Faturado: {formatCentsToCurrency(ch.grossRevenueInCents)}</span>
+                  <span>CMV: {formatCentsToCurrency(ch.cmvInCents)}</span>
+                </div>
+                <div className="text-stone-700 font-mono font-bold pt-1 border-t border-stone-200/40 flex justify-between">
+                  <span>Sobra Limpa:</span>
+                  <span className="text-emerald-800">{formatCentsToCurrency(ch.netMarginInCents)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {filteredSales.length === 0 ? (
         <EmptyState
           icon={ShoppingBag}
@@ -626,6 +770,93 @@ export const SalesTab: React.FC<SalesTabProps> = ({
           </div>
         </div>
       </Modal>
+
+      {/* Modal Mapeamento Inteligente por Similaridade (F43) */}
+      <Modal
+        isOpen={isMappingModalOpen}
+        onClose={() => setIsMappingModalOpen(false)}
+        title="Mapeamento Inteligente de Vendas (F43)"
+        subtitle="Algoritmo determinístico de Jaro-Winkler + Tokens para vincular itens externos às suas Fichas Técnicas."
+        maxWidth="2xl"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-stone-600 leading-relaxed">
+            Ao vincular um produto à ficha técnica, o sistema passa a calcular o CMV real e deduzir automaticamente o estoque dos insumos a cada venda.
+          </p>
+
+          <div className="divide-y divide-stone-100 border border-stone-200 rounded-xl overflow-hidden max-h-80 overflow-y-auto">
+            {mappingSuggestions.map((item) => {
+              const bestMatch = item.matches[0];
+              return (
+                <div key={item.externalName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-stone-50 text-xs">
+                  <div>
+                    <span className="font-semibold text-stone-900 block">{item.externalName}</span>
+                    {bestMatch ? (
+                      <span className="text-[11px] text-stone-500 flex items-center gap-1.5 mt-0.5">
+                        <span className={`px-1.5 py-0.2 rounded font-bold text-[10px] ${
+                          bestMatch.confidenceTier === 'ALTA'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {bestMatch.confidenceTier} ({Math.round(bestMatch.score * 100)}%)
+                        </span>
+                        <span>Sugestão: <strong>{bestMatch.targetName}</strong></span>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-stone-400">Sem correspondência próxima</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {bestMatch ? (
+                      <button
+                        onClick={() => {
+                          handleApplyMapping(item.externalName, bestMatch.targetId);
+                        }}
+                        className="px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-lg font-medium text-xs cursor-pointer flex items-center gap-1 shadow-xs"
+                      >
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Vincular com 1 Clique</span>
+                      </button>
+                    ) : (
+                      <select
+                        onChange={(e) => {
+                          if (e.target.value) handleApplyMapping(item.externalName, e.target.value);
+                        }}
+                        className="text-xs border border-stone-300 rounded p-1 bg-white font-medium"
+                      >
+                        <option value="">Vincular manualmente a...</option>
+                        {recipes.map((r) => (
+                          <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-3 border-t border-stone-100 flex justify-end">
+            <button
+              onClick={() => setIsMappingModalOpen(false)}
+              className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-medium rounded-lg cursor-pointer"
+            >
+              Concluir Mapeamentos
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal "Como Calculamos" */}
+      {selectedExplanation && (
+        <ExplanationModal
+          isOpen={true}
+          onClose={() => setSelectedExplanation(null)}
+          title={selectedExplanation.title}
+          explanation={selectedExplanation.explanation}
+        />
+      )}
     </div>
   );
 };

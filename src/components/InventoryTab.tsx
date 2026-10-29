@@ -17,6 +17,9 @@ import {
   ArrowUpRight,
   History,
   ShieldCheck,
+  Clock,
+  ShieldAlert,
+  CheckCircle2,
 } from 'lucide-react';
 import { StockMovement, Ingredient, StockMovementType } from '../domain/types';
 import { calculateStockBalances, calculateAbcCurve } from '../domain/inventory';
@@ -24,6 +27,8 @@ import { formatBaseQuantity, formatCentsToCurrency, parseCurrencyToCents } from 
 import { MiseDatabaseState, appendAuditLog } from '../lib/storage';
 import { Modal, ConfirmDialog } from './Modal';
 import { EmptyState } from './EmptyState';
+import { calculateUsageVariance, calculateFefoExpirationRisk } from '../domain/inventory-intelligence';
+import { ExplanationModal, HowWeCalculatedButton } from './ExplanationModal';
 
 interface InventoryTabProps {
   database: MiseDatabaseState;
@@ -38,7 +43,36 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
 }) => {
   const { activeStoreId, ingredients, stockMovements, stores } = database;
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'BALANCES' | 'MOVEMENTS' | 'ABC' | 'COUNT'>('BALANCES');
+  const [viewMode, setViewMode] = useState<'BALANCES' | 'MOVEMENTS' | 'ABC' | 'COUNT' | 'VARIANCE' | 'FEFO'>('BALANCES');
+  const [selectedExplanation, setSelectedExplanation] = useState<{ title: string; explanation: any } | null>(null);
+
+  // F13: Variância de Uso Teórico vs Real
+  const usageVarianceReport = useMemo(() => {
+    const recMap = new Map(database.recipes.map(r => [r.id, r]));
+    const ingMap = new Map(ingredients.map(i => [i.id, i]));
+    return calculateUsageVariance(database.inventoryCounts || [], stockMovements, database.salesImports || [], recMap, ingMap, activeStoreId);
+  }, [database.inventoryCounts, stockMovements, database.salesImports, database.recipes, ingredients, activeStoreId]);
+
+  // F14: Risco FEFO
+  const fefoReport = useMemo(() => {
+    const ingMap = new Map(ingredients.map(i => [i.id, i]));
+    const dailyMap: Record<string, number> = {};
+    for (const s of database.salesImports || []) {
+      for (const line of s.lines) {
+        if (line.mappedRecipeId) {
+          const rec = database.recipes.find(r => r.id === line.mappedRecipeId);
+          if (rec) {
+            for (const rl of rec.lines) {
+              if (rl.ingredientId) {
+                dailyMap[rl.ingredientId] = (dailyMap[rl.ingredientId] || 0) + (rl.quantityInBaseUnit * rl.correctionFactor * line.quantity) / 30;
+              }
+            }
+          }
+        }
+      }
+    }
+    return calculateFefoExpirationRisk(database.stockLots || [], ingMap, dailyMap);
+  }, [database.stockLots, ingredients, database.salesImports, database.recipes]);
 
   // Modais de Movimentação
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
@@ -299,7 +333,7 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
               />
             </div>
 
-            <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-lg">
+            <div className="flex flex-wrap items-center gap-1 bg-stone-100 p-1 rounded-lg">
               <button
                 onClick={() => setViewMode('BALANCES')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
@@ -323,6 +357,22 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                 }`}
               >
                 Curva ABC
+              </button>
+              <button
+                onClick={() => setViewMode('VARIANCE')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  viewMode === 'VARIANCE' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Variância (F13)
+              </button>
+              <button
+                onClick={() => setViewMode('FEFO')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  viewMode === 'FEFO' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Vencimento FEFO (F14)
               </button>
             </div>
           </div>
@@ -494,6 +544,196 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* VIEW: F13 Variância de Uso (Teórico × Real) */}
+          {viewMode === 'VARIANCE' && (
+            <div className="bg-white rounded-xl border border-stone-200/80 p-5 shadow-2xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-100">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                      F13 · Variância de Uso de Insumos (Teórico × Real)
+                    </span>
+                    <span className="text-[10px] bg-stone-100 text-stone-700 font-mono font-bold px-1.5 py-0.5 rounded">
+                      2 Contagens Físicas
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Compara o consumo real de estoque (Estoque Inicial + Entradas - Estoque Final) com o consumo teórico das fichas técnicas.
+                  </p>
+                </div>
+                <HowWeCalculatedButton
+                  onClick={() => setSelectedExplanation({ title: 'Variância de Uso (F13)', explanation: usageVarianceReport.explanation })}
+                />
+              </div>
+
+              {!usageVarianceReport.hasSufficientCounts ? (
+                <div className="p-6 bg-amber-50 border border-amber-200 rounded-xl text-center space-y-3">
+                  <AlertTriangle className="w-8 h-8 text-amber-700 mx-auto" />
+                  <div>
+                    <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                      Dados Insuficientes para Variância
+                    </h4>
+                    <p className="text-xs text-amber-800 mt-1 max-w-lg mx-auto">
+                      {usageVarianceReport.explanation.suficienciaDeDados.faltam}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setIsCountModalOpen(true)}
+                    className="px-4 py-2 bg-amber-900 hover:bg-stone-900 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    + Fazer Contagem Física Agora
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 bg-stone-900 text-white rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-stone-400 font-medium block">Prejuízo por Desperdício / Divergência:</span>
+                      <span className="text-2xl font-bold font-mono text-rose-400">
+                        {formatCentsToCurrency(usageVarianceReport.totalDiscrepancyInCents)}
+                      </span>
+                    </div>
+                    <span className="text-xs text-stone-400">
+                      Período de {new Date(usageVarianceReport.startDate!).toLocaleDateString('pt-BR')} a {new Date(usageVarianceReport.endDate!).toLocaleDateString('pt-BR')}
+                    </span>
+                  </div>
+
+                  <div className="border border-stone-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-stone-100 text-stone-600 font-semibold border-b border-stone-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Insumo</th>
+                          <th className="py-2.5 px-3">Consumo Teórico</th>
+                          <th className="py-2.5 px-3">Consumo Real</th>
+                          <th className="py-2.5 px-3 text-right">Desvio</th>
+                          <th className="py-2.5 px-3 text-right">Impacto em R$</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {usageVarianceReport.items.map((item) => (
+                          <tr key={item.ingredientId} className="hover:bg-stone-50">
+                            <td className="py-2 px-3 font-semibold text-stone-900">{item.ingredientName}</td>
+                            <td className="py-2 px-3 font-mono text-stone-600">
+                              {item.theoreticalConsumptionInBaseUnit} {item.baseUnit}
+                            </td>
+                            <td className="py-2 px-3 font-mono text-stone-600">
+                              {item.realConsumptionInBaseUnit} {item.baseUnit}
+                            </td>
+                            <td className="py-2 px-3 font-mono text-right font-medium text-stone-800">
+                              {item.varianceInBaseUnit > 0 ? `+${item.varianceInBaseUnit}` : item.varianceInBaseUnit} {item.baseUnit}
+                              <span className="text-[10px] text-stone-400 ml-1">({item.variancePercentage}%)</span>
+                            </td>
+                            <td className={`py-2 px-3 font-mono font-bold text-right ${
+                              item.varianceInCents > 0 ? 'text-rose-600' : 'text-emerald-700'
+                            }`}>
+                              {item.varianceInCents > 0 ? `-${formatCentsToCurrency(item.varianceInCents)}` : 'R$ 0,00'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW: F14 Risco de Vencimento FEFO */}
+          {viewMode === 'FEFO' && (
+            <div className="bg-white rounded-xl border border-stone-200/80 p-5 shadow-2xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-100">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                      F14 · Risco de Vencimento (FEFO - Primeiro que Vence, Primeiro que Sai)
+                    </span>
+                    <span className="text-[10px] bg-rose-100 text-rose-800 font-mono font-bold px-1.5 py-0.5 rounded">
+                      {fefoReport.items.length} Lote(s) em Risco
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Projeta o consumo médio até a data de validade de cada lote para evitar descarte e perda de insumos.
+                  </p>
+                </div>
+                <HowWeCalculatedButton
+                  onClick={() => setSelectedExplanation({ title: 'Risco de Vencimento FEFO (F14)', explanation: fefoReport.explanation })}
+                />
+              </div>
+
+              {fefoReport.items.length === 0 ? (
+                <div className="py-10 text-center text-xs text-stone-500 space-y-1">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                  <p className="font-semibold text-stone-800">Nenhum lote com risco de vencimento iminente!</p>
+                  <p className="text-stone-400">Todos os insumos com rastreio de validade estão dentro do ritmo seguro de consumo.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 bg-rose-950 text-white rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-rose-300 font-medium block">Valor Total em Risco de Descarte:</span>
+                      <span className="text-2xl font-bold font-mono text-rose-400">
+                        {formatCentsToCurrency(fefoReport.totalAmountAtRiskInCents)}
+                      </span>
+                    </div>
+                    <span className="text-xs text-rose-300">
+                      Promova pratos que usem estes lotes para evitar prejuízo
+                    </span>
+                  </div>
+
+                  <div className="border border-stone-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-stone-100 text-stone-600 font-semibold border-b border-stone-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Lote / Insumo</th>
+                          <th className="py-2.5 px-3">Validade</th>
+                          <th className="py-2.5 px-3">Saldo Atual</th>
+                          <th className="py-2.5 px-3">Consumo Diário</th>
+                          <th className="py-2.5 px-3 text-right">Excedente em Risco</th>
+                          <th className="py-2.5 px-3 text-right">R$ em Risco</th>
+                          <th className="py-2.5 px-3 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {fefoReport.items.map((item) => (
+                          <tr key={item.lotId} className="hover:bg-stone-50">
+                            <td className="py-2 px-3">
+                              <span className="font-semibold text-stone-900 block">{item.ingredientName}</span>
+                              <span className="text-[10px] font-mono text-stone-400">{item.lotNumber}</span>
+                            </td>
+                            <td className="py-2 px-3 font-mono text-stone-700">
+                              {new Date(item.expirationDate).toLocaleDateString('pt-BR')} ({item.daysRemaining} dias)
+                            </td>
+                            <td className="py-2 px-3 font-mono text-stone-600">
+                              {item.currentStockInBaseUnit} {item.baseUnit}
+                            </td>
+                            <td className="py-2 px-3 font-mono text-stone-600">
+                              {item.dailyConsumptionInBaseUnit.toFixed(1)} {item.baseUnit}/dia
+                            </td>
+                            <td className="py-2 px-3 font-mono text-right text-rose-700 font-semibold">
+                              {item.excessInBaseUnit.toFixed(0)} {item.baseUnit}
+                            </td>
+                            <td className="py-2 px-3 font-mono font-bold text-right text-rose-600">
+                              {formatCentsToCurrency(item.amountAtRiskInCents)}
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                item.urgency === 'VENCIDO' ? 'bg-rose-100 text-rose-900' :
+                                item.urgency === 'CRITICO' ? 'bg-orange-100 text-orange-900' :
+                                'bg-amber-100 text-amber-900'
+                              }`}>
+                                {item.urgency}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -731,6 +971,16 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
           </div>
         </form>
       </Modal>
+
+      {/* Modal Como Calculamos */}
+      {selectedExplanation && (
+        <ExplanationModal
+          isOpen={true}
+          onClose={() => setSelectedExplanation(null)}
+          title={selectedExplanation.title}
+          explanation={selectedExplanation.explanation}
+        />
+      )}
     </div>
   );
 };

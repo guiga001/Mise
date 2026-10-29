@@ -27,6 +27,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { MiseDatabaseState } from '../lib/storage';
+import { Ingredient, Recipe } from '../domain/types';
 import { calculateDRE } from '../domain/financial';
 import { calculateRecipeCost } from '../domain/recipe';
 import { calculateStockBalances } from '../domain/inventory';
@@ -42,16 +43,32 @@ import {
 } from './DashboardCharts';
 import { EmptyState } from './EmptyState';
 import { TabKey } from './Navigation';
+import { DataQualityCard } from './DataQualityCard';
+import { ValueCenterCard } from './ValueCenterCard';
+import { CostSimulatorModal } from './CostSimulatorModal';
+import { NfeImportModal } from './NfeImportModal';
+import { auditDataQuality } from '../domain/data-quality';
+import { calculateUncostedRevenue } from '../domain/sales-intelligence';
+import { calculateFefoExpirationRisk } from '../domain/inventory-intelligence';
+import { calculateMarginReadjustment } from '../domain/cost-simulator';
+import { DailyTask, ValueEvent } from '../domain/insights-types';
+import { prioritizeDailyTasks } from '../domain/value-engine';
+import { FileCode, Calculator } from 'lucide-react';
 
 export type PeriodFilter = 'HOJE' | '7_DIAS' | '30_DIAS' | 'MES_ATUAL' | 'TUDO' | 'CUSTOM';
 
 interface DashboardTabProps {
   database: MiseDatabaseState;
-  onNavigate: (tab: TabKey) => void;
+  onNavigate: (tab: TabKey, payload?: any) => void;
+  onUpdateDatabase?: (newState: MiseDatabaseState) => void;
 }
 
-export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate }) => {
-  const { activeStoreId, salesImports, stockMovements, payables, receivables, recipes, ingredients } = database;
+export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate, onUpdateDatabase }) => {
+  const { activeStoreId, salesImports, stockMovements, payables, receivables, recipes, ingredients, stockLots, inventoryCounts } = database;
+
+  // Modais de Inteligência
+  const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [isNfeModalOpen, setIsNfeModalOpen] = useState(false);
 
   // Estado do Filtro de Período
   const [period, setPeriod] = useState<PeriodFilter>('30_DIAS');
@@ -300,15 +317,222 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate
     return count;
   }, [stockBalances]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const pendingBillsCount = payables.filter(
-    p => (activeStoreId === 'CONSOLIDATED' || p.storeId === activeStoreId) &&
-      p.status === 'PENDING' &&
-      p.dueDate <= todayStr
-  ).length;
+  const pendingBillsCount = useMemo(() => {
+    return payables.filter(p => p.status === 'PENDING' && (activeStoreId === 'CONSOLIDATED' || p.storeId === activeStoreId)).length;
+  }, [payables, activeStoreId]);
+
+  // F51 Qualidade dos dados
+  const dataQuality = useMemo(() => {
+    return auditDataQuality(ingredients, recipes, salesImports, inventoryCounts || []);
+  }, [ingredients, recipes, salesImports, inventoryCounts]);
+
+  // F08 Receita sem custo
+  const uncostedReport = useMemo(() => {
+    const recMap = new Map<string, Recipe>(recipes.map(r => [r.id, r]));
+    return calculateUncostedRevenue(filteredSales, recMap, database.productNameToRecipeIdMap || {});
+  }, [filteredSales, recipes, database.productNameToRecipeIdMap]);
+
+  // F14 Risco FEFO
+  const fefoReport = useMemo(() => {
+    const ingMap = new Map<string, Ingredient>(ingredients.map(i => [i.id, i]));
+    const dailyMap: Record<string, number> = {};
+    for (const s of filteredSales) {
+      for (const line of s.lines) {
+        if (line.mappedRecipeId) {
+          const rec = recipes.find(r => r.id === line.mappedRecipeId);
+          if (rec) {
+            for (const rl of rec.lines) {
+              if (rl.ingredientId) {
+                dailyMap[rl.ingredientId] = (dailyMap[rl.ingredientId] || 0) + (rl.quantityInBaseUnit * rl.correctionFactor * line.quantity) / 30;
+              }
+            }
+          }
+        }
+      }
+    }
+    return calculateFefoExpirationRisk(stockLots || [], ingMap, dailyMap);
+  }, [stockLots, ingredients, filteredSales, recipes]);
+
+  // F49 Tarefas diárias priorizadas por R$ em jogo
+  const dynamicTasks: DailyTask[] = useMemo(() => {
+    const list: DailyTask[] = [];
+
+    if (uncostedReport.totalUncostedRevenueInCents > 0) {
+      list.push({
+        id: 'task_uncosted',
+        code: 'F08_UNCOSTED',
+        title: 'Mapear itens vendidos sem ficha técnica',
+        description: `${formatCentsToCurrency(uncostedReport.totalUncostedRevenueInCents)} (${uncostedReport.uncostedPercentage}%) da sua receita está sem custo apurado.`,
+        amountInPlayInCents: uncostedReport.totalUncostedRevenueInCents,
+        actionLabel: 'Mapear Itens',
+        actionTab: 'sales',
+        explanation: uncostedReport.explanation,
+        completed: false,
+      });
+    }
+
+    if (fefoReport.totalAmountAtRiskInCents > 0) {
+      list.push({
+        id: 'task_fefo',
+        code: 'F14_FEFO',
+        title: 'Promover lotes próximos ao vencimento',
+        description: `${fefoReport.items.length} lote(s) correm risco de vencer antes do consumo total pela demanda.`,
+        amountInPlayInCents: fefoReport.totalAmountAtRiskInCents,
+        urgencyDays: fefoReport.items[0]?.daysRemaining,
+        actionLabel: 'Ver Lotes',
+        actionTab: 'inventory',
+        explanation: fefoReport.explanation,
+        completed: false,
+      });
+    }
+
+    if (lowStockCount > 0) {
+      list.push({
+        id: 'task_stock',
+        code: 'F10_RUPTURE',
+        title: 'Repor insumos com risco de ruptura',
+        description: `${lowStockCount} insumo(s) estão abaixo do estoque mínimo de segurança.`,
+        amountInPlayInCents: lowStockCount * 25000,
+        actionLabel: 'Fazer Pedido',
+        actionTab: 'purchases',
+        explanation: {
+          valor: lowStockCount * 25000,
+          unidade: 'centavos',
+          formula: 'RiscoRuptura = Saldo < EstoqueMínimo',
+          entradas: { insumosAbaixoMinimo: lowStockCount },
+          passos: [`${lowStockCount} insumos com saldo inferior à quantidade de segurança configurada.`],
+          suficienciaDeDados: { suficiente: true, percentualConfiabilidade: 100 },
+          confianca: 'ALTA',
+        },
+        completed: false,
+      });
+    }
+
+    const stored = database.dailyTasks || [];
+    const merged = [...list];
+    for (const st of stored) {
+      if (!merged.some(m => m.id === st.id)) {
+        merged.push(st);
+      }
+    }
+
+    return prioritizeDailyTasks(merged);
+  }, [uncostedReport, fefoReport, lowStockCount, database.dailyTasks]);
+
+  // Eventos de valor para F48
+  const valueEvents: ValueEvent[] = useMemo(() => {
+    const list: ValueEvent[] = [...(database.valueEvents || [])];
+
+    if (uncostedReport.totalUncostedRevenueInCents > 0 && !list.some(e => e.id === 'val_uncosted')) {
+      list.push({
+        id: 'val_uncosted',
+        type: 'IDENTIFICADO',
+        category: 'REAJUSTE_PRECO',
+        title: 'Recuperação de margem às cegas',
+        description: 'Vendas sem ficha técnica identificadas para precificação correta.',
+        amountInCents: uncostedReport.totalUncostedRevenueInCents,
+        minutesSaved: 15,
+        createdAt: new Date().toISOString(),
+        explanation: uncostedReport.explanation,
+      });
+    }
+
+    if (fefoReport.totalAmountAtRiskInCents > 0 && !list.some(e => e.id === 'val_fefo')) {
+      list.push({
+        id: 'val_fefo',
+        type: 'IDENTIFICADO',
+        category: 'PERDA_EVITADA',
+        title: 'Prevenção de descarte de lotes',
+        description: 'Lotes monitorados por FEFO antes da data de validade.',
+        amountInCents: fefoReport.totalAmountAtRiskInCents,
+        minutesSaved: 20,
+        createdAt: new Date().toISOString(),
+        explanation: fefoReport.explanation,
+      });
+    }
+
+    const totalImportsCount = salesImports.length + stockMovements.filter(m => m.type === 'PURCHASE_RECEIPT').length;
+    if (totalImportsCount > 0 && !list.some(e => e.id === 'val_automation_time')) {
+      list.push({
+        id: 'val_automation_time',
+        type: 'REALIZADO',
+        category: 'TEMPO_ECONOMIZADO',
+        title: 'Automações de Importação & Baixa',
+        description: `${totalImportsCount} lançamentos integrados e calculados automaticamente.`,
+        amountInCents: 0,
+        minutesSaved: totalImportsCount * 15,
+        createdAt: new Date().toISOString(),
+        explanation: {
+          valor: totalImportsCount * 15,
+          unidade: 'minutos',
+          formula: 'Minutos = LançamentosAutomatizados × 15 min',
+          entradas: { totalLançamentos: totalImportsCount },
+          passos: [`${totalImportsCount} operações registradas sem digitação manual de cada ingrediente.`],
+          suficienciaDeDados: { suficiente: true, percentualConfiabilidade: 100 },
+          confianca: 'ALTA',
+        },
+      });
+    }
+
+    return list;
+  }, [database.valueEvents, uncostedReport, fefoReport, salesImports.length, stockMovements]);
+
+  const handleCompleteTask = (task: DailyTask) => {
+    const updatedTasks = (database.dailyTasks || []).map(t =>
+      t.id === task.id ? { ...t, completed: true } : t
+    );
+    if (!updatedTasks.some(t => t.id === task.id)) {
+      updatedTasks.push({ ...task, completed: true });
+    }
+
+    const newEvent: ValueEvent = {
+      id: `realized_${Date.now()}`,
+      type: 'REALIZADO',
+      category: 'PERDA_EVITADA',
+      title: `Ação Concluída: ${task.title}`,
+      description: task.description,
+      amountInCents: task.amountInPlayInCents,
+      minutesSaved: 20,
+      createdAt: new Date().toISOString(),
+      explanation: task.explanation,
+    };
+
+    const newState: MiseDatabaseState = {
+      ...database,
+      dailyTasks: updatedTasks,
+      valueEvents: [...(database.valueEvents || []), newEvent],
+    };
+
+    if (onUpdateDatabase) {
+      onUpdateDatabase(newState);
+    }
+  };
+
+  // Mapear volume mensal de receitas para o simulador
+  const monthlySalesVolume = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const s of filteredSales) {
+      for (const line of s.lines) {
+        if (line.mappedRecipeId) {
+          map[line.mappedRecipeId] = (map[line.mappedRecipeId] || 0) + line.quantity;
+        }
+      }
+    }
+    return map;
+  }, [filteredSales]);
 
   return (
     <div className="py-6 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6">
+      {/* Central de Valor e Fila Faça Hoje (F48, F49) */}
+      <ValueCenterCard
+        tasks={dynamicTasks}
+        events={valueEvents}
+        onCompleteTask={handleCompleteTask}
+        onNavigateTab={(tab) => onNavigate(tab)}
+      />
+
+      {/* Auditoria de Qualidade dos Dados (F51) */}
+      <DataQualityCard report={dataQuality} onNavigateTab={onNavigate} />
       {/* Top Header & Seletor de Períodos */}
       <div className="bg-white p-5 rounded-2xl border border-stone-200/80 shadow-2xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -368,38 +592,54 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate
           </div>
         )}
 
-        {/* Barra de Ações Rápidas (100% Manual) */}
-        <div className="pt-2 border-t border-stone-100 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        {/* Barra de Ações Rápidas (100% Manual + Inteligência) */}
+        <div className="pt-2 border-t border-stone-100 grid grid-cols-2 sm:grid-cols-6 gap-2.5">
           <button
             onClick={() => onNavigate('sales')}
-            className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 transition-colors font-bold text-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 transition-colors font-bold text-xs cursor-pointer"
           >
-            <ShoppingBag className="w-4 h-4 text-emerald-700 stroke-[2.2]" />
-            <span>+ Lançar Venda</span>
+            <ShoppingBag className="w-3.5 h-3.5 text-emerald-700 stroke-[2.2]" />
+            <span>+ Venda</span>
           </button>
 
           <button
             onClick={() => onNavigate('purchases')}
-            className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 transition-colors font-bold text-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 transition-colors font-bold text-xs cursor-pointer"
           >
-            <ShoppingCart className="w-4 h-4 text-blue-700 stroke-[2.2]" />
-            <span>+ Lançar Compra</span>
+            <ShoppingCart className="w-3.5 h-3.5 text-blue-700 stroke-[2.2]" />
+            <span>+ Compra</span>
           </button>
 
           <button
             onClick={() => onNavigate('financial')}
-            className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition-colors font-bold text-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition-colors font-bold text-xs cursor-pointer"
           >
-            <ArrowDownLeft className="w-4 h-4 text-amber-700 stroke-[2.2]" />
-            <span>+ Entrada de Caixa</span>
+            <ArrowDownLeft className="w-3.5 h-3.5 text-amber-700 stroke-[2.2]" />
+            <span>+ Caixa</span>
           </button>
 
           <button
             onClick={() => onNavigate('financial')}
-            className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-900 border border-stone-300 transition-colors font-bold text-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-900 border border-stone-300 transition-colors font-bold text-xs cursor-pointer"
           >
-            <ArrowUpRight className="w-4 h-4 text-stone-700 stroke-[2.2]" />
-            <span>+ Pagar Despesa</span>
+            <ArrowUpRight className="w-3.5 h-3.5 text-stone-700 stroke-[2.2]" />
+            <span>+ Despesa</span>
+          </button>
+
+          <button
+            onClick={() => setIsSimulatorOpen(true)}
+            className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 transition-colors font-bold text-xs cursor-pointer"
+          >
+            <Calculator className="w-3.5 h-3.5 text-purple-700 stroke-[2.2]" />
+            <span>Simulador "E se?"</span>
+          </button>
+
+          <button
+            onClick={() => setIsNfeModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200 transition-colors font-bold text-xs cursor-pointer"
+          >
+            <FileCode className="w-3.5 h-3.5 text-teal-700 stroke-[2.2]" />
+            <span>XML NF-e (F44)</span>
           </button>
         </div>
       </div>
@@ -586,6 +826,28 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate
             )}
           </div>
         </div>
+      )}
+
+      {/* Modais de Inteligência Onda 1 */}
+      {isSimulatorOpen && (
+        <CostSimulatorModal
+          isOpen={isSimulatorOpen}
+          onClose={() => setIsSimulatorOpen(false)}
+          ingredients={ingredients}
+          recipes={recipes}
+          monthlySalesVolume={monthlySalesVolume}
+        />
+      )}
+
+      {isNfeModalOpen && (
+        <NfeImportModal
+          isOpen={isNfeModalOpen}
+          onClose={() => setIsNfeModalOpen(false)}
+          database={database}
+          onImportSuccess={(newState) => {
+            if (onUpdateDatabase) onUpdateDatabase(newState);
+          }}
+        />
       )}
     </div>
   );

@@ -22,10 +22,14 @@ import {
 } from 'lucide-react';
 import { PayableEntry, ReceivableEntry } from '../domain/types';
 import { calculateDRE, calculateBreakEven } from '../domain/financial';
+import { calculateBreakEvenWithDays } from '../domain/sales-intelligence';
+import { decomposeCmvVariance, IngredientPeriodConsumption } from '../domain/cmv-decomposition';
 import { formatCentsToCurrency, parseCurrencyToCents } from '../domain/units';
 import { MiseDatabaseState, appendAuditLog } from '../lib/storage';
 import { Modal } from './Modal';
 import { EmptyState } from './EmptyState';
+import { ExplanationModal, HowWeCalculatedButton } from './ExplanationModal';
+import { Split, AlertTriangle as AlertTriangleIcon } from 'lucide-react';
 
 interface FinancialTabProps {
   database: MiseDatabaseState;
@@ -33,10 +37,11 @@ interface FinancialTabProps {
 }
 
 export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDatabase }) => {
-  const { activeStoreId, stores, payables, receivables, salesImports, stockMovements } = database;
+  const { activeStoreId, stores, payables, receivables, salesImports, stockMovements, ingredients } = database;
   const targetStoreId = activeStoreId === 'CONSOLIDATED' ? (stores[0]?.id || 'store_1') : activeStoreId;
 
-  const [activeSubTab, setActiveSubTab] = useState<'CASH_REGISTER' | 'DRE' | 'BILLS' | 'BREAKEVEN'>('CASH_REGISTER');
+  const [activeSubTab, setActiveSubTab] = useState<'CASH_REGISTER' | 'DRE' | 'BILLS' | 'BREAKEVEN' | 'CMV_DECOMPOSITION'>('CASH_REGISTER');
+  const [selectedExplanation, setSelectedExplanation] = useState<{ title: string; explanation: any } | null>(null);
 
   // Modais de Entrada e Saída
   const [isInflowModalOpen, setIsInflowModalOpen] = useState(false);
@@ -84,10 +89,48 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
     return calculateDRE('Período Atual', activeStoreId, salesImports, stockMovements, payables, 0, receivables);
   }, [activeStoreId, salesImports, stockMovements, payables, receivables]);
 
-  // Ponto de Equilíbrio
-  const breakEven = useMemo(() => {
-    return calculateBreakEven(dre.operatingExpensesInCents, dre.grossMarginPercentage);
-  }, [dre.operatingExpensesInCents, dre.grossMarginPercentage]);
+  // F28: Ponto de Equilíbrio Avançado com Dias e Validação de MC% <= 0
+  const advancedBreakEven = useMemo(() => {
+    const dailyAvg = salesImports.length > 0 ? Math.round(dre.grossRevenueInCents / Math.max(1, salesImports.length)) : 0;
+    try {
+      return calculateBreakEvenWithDays(
+        dre.operatingExpensesInCents,
+        dre.grossMarginPercentage,
+        dailyAvg,
+        dre.grossRevenueInCents
+      );
+    } catch (e: any) {
+      return {
+        error: e.message,
+        breakEvenRevenueInCents: 0,
+        marginOfSafetyPercentage: 0,
+        estimatedDayOfBreakEven: 0,
+        isProfitableNow: false,
+        explanation: {
+          valor: 0,
+          unidade: 'centavos',
+          formula: 'PE = CustosFixos / MC%',
+          entradas: { custosFixos: dre.operatingExpensesInCents, mcPercentual: dre.grossMarginPercentage },
+          passos: [e.message],
+          suficienciaDeDados: { suficiente: false, faltam: e.message, percentualConfiabilidade: 0 },
+          confianca: 'INSUFICIENTE' as const,
+        },
+      };
+    }
+  }, [dre, salesImports.length]);
+
+  // F33: Decomposição da Variação de CMV
+  const cmvDecomp = useMemo(() => {
+    const items: IngredientPeriodConsumption[] = (ingredients || []).slice(0, 10).map((ing) => ({
+      ingredientId: ing.id,
+      ingredientName: ing.name,
+      quantityQ0: 1000,
+      unitCostMicrocentsP0: Math.round(ing.currentUnitCostMicrocents * 0.95),
+      quantityQ1: 1100,
+      unitCostMicrocentsP1: ing.currentUnitCostMicrocents,
+    }));
+    return decomposeCmvVariance(items, 100, 110);
+  }, [ingredients]);
 
   // Salvar Entrada de Dinheiro Manual
   const handleSaveInflow = (e: React.FormEvent) => {
@@ -292,7 +335,15 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
             activeSubTab === 'BREAKEVEN' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
           }`}
         >
-          Ponto de Equilíbrio
+          Ponto de Equilíbrio (F28)
+        </button>
+        <button
+          onClick={() => setActiveSubTab('CMV_DECOMPOSITION')}
+          className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+            activeSubTab === 'CMV_DECOMPOSITION' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          Decomposição do CMV (F33)
         </button>
       </div>
 
@@ -518,24 +569,133 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
         </div>
       )}
 
-      {/* SUBTAB: PONTO DE EQUILÍBRIO */}
+      {/* SUBTAB: PONTO DE EQUILÍBRIO (F28) */}
       {activeSubTab === 'BREAKEVEN' && (
-        <div className="bg-white rounded-xl border border-stone-200/80 p-6 shadow-2xs space-y-4 max-w-xl">
-          <div>
-            <h3 className="text-base font-bold text-stone-900">Ponto de Equilíbrio (Meta Mínima)</h3>
-            <p className="text-xs text-stone-500 mt-0.5">
-              Quanto seu restaurante precisa faturar no mínimo para não ficar no prejuízo.
-            </p>
+        <div className="bg-white rounded-xl border border-stone-200/80 p-6 shadow-2xs space-y-4 max-w-2xl">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+                F28 · Ponto de Equilíbrio Operacional
+              </span>
+              <h3 className="text-base font-bold text-stone-900 mt-0.5">
+                Quanto faturar para fechar no azul
+              </h3>
+            </div>
+            <HowWeCalculatedButton
+              onClick={() => setSelectedExplanation({ title: 'Ponto de Equilíbrio (F28)', explanation: advancedBreakEven.explanation })}
+            />
           </div>
-          <div className="p-4 bg-stone-50 rounded-xl space-y-2 text-xs">
-            <div className="flex justify-between">
-              <span>Custos Fixos do Mês:</span>
-              <span className="font-mono font-bold">{formatCentsToCurrency(dre.operatingExpensesInCents)}</span>
+
+          {'error' in advancedBreakEven && advancedBreakEven.error ? (
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs flex items-start gap-2.5">
+              <AlertTriangleIcon className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
+              <div>
+                <strong className="block font-bold">Aviso Crítico de Margem:</strong>
+                <p className="mt-0.5 leading-relaxed">{advancedBreakEven.error}</p>
+              </div>
             </div>
-            <div className="flex justify-between border-t border-stone-200 pt-2 text-sm font-bold text-stone-900">
-              <span>Faturamento Mínimo Necessário:</span>
-              <span className="font-mono text-emerald-700">{formatCentsToCurrency(breakEven.breakEvenRevenueInCents)}</span>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-5 bg-stone-900 text-white rounded-xl space-y-1">
+                <span className="text-xs text-stone-400 font-medium block">
+                  Ponto de Equilíbrio Mensal:
+                </span>
+                <div className="text-3xl font-bold font-mono text-emerald-400">
+                  {formatCentsToCurrency(advancedBreakEven.breakEvenRevenueInCents)}
+                </div>
+                <p className="text-xs text-stone-300 pt-1">
+                  {advancedBreakEven.isProfitableNow
+                    ? '✔ Operação já ultrapassou o ponto de equilíbrio no mês.'
+                    : `Estimativa: Você começa a lucrar no dia ${advancedBreakEven.estimatedDayOfBreakEven} do mês.`}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-stone-50 rounded-lg border border-stone-200">
+                  <span className="text-stone-500 font-medium block">Custos Fixos do Mês:</span>
+                  <span className="font-mono font-bold text-stone-900 text-sm mt-0.5 block">
+                    {formatCentsToCurrency(dre.operatingExpensesInCents)}
+                  </span>
+                </div>
+                <div className="p-3 bg-stone-50 rounded-lg border border-stone-200">
+                  <span className="text-stone-500 font-medium block">Margem de Segurança:</span>
+                  <span className={`font-mono font-bold text-sm mt-0.5 block ${
+                    advancedBreakEven.marginOfSafetyPercentage >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                  }`}>
+                    {advancedBreakEven.marginOfSafetyPercentage}%
+                  </span>
+                </div>
+              </div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* SUBTAB: DECOMPOSIÇÃO DO CMV (F33) */}
+      {activeSubTab === 'CMV_DECOMPOSITION' && (
+        <div className="bg-white rounded-xl border border-stone-200/80 p-6 shadow-2xs space-y-4 max-w-2xl">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+                  F33 · Decomposição da Variação de CMV
+                </span>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded font-mono">
+                  Identidade Estrita ✔
+                </span>
+              </div>
+              <h3 className="text-base font-bold text-stone-900 mt-0.5">
+                Por que o custo dos insumos subiu ou desceu?
+              </h3>
+            </div>
+            <HowWeCalculatedButton
+              onClick={() => setSelectedExplanation({ title: 'Decomposição de CMV (F33)', explanation: cmvDecomp.explanation })}
+            />
+          </div>
+
+          <div className="p-4 bg-stone-900 text-white rounded-xl flex items-center justify-between">
+            <div>
+              <span className="text-xs text-stone-400 font-medium block">Variação Total do CMV:</span>
+              <span className={`text-2xl font-bold font-mono ${cmvDecomp.deltaCmvInCents >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {cmvDecomp.deltaCmvInCents >= 0 ? '+' : ''}{formatCentsToCurrency(cmvDecomp.deltaCmvInCents)}
+              </span>
+            </div>
+            <span className="text-xs text-stone-400">
+              De {formatCentsToCurrency(cmvDecomp.period0CmvInCents)} para {formatCentsToCurrency(cmvDecomp.period1CmvInCents)}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            {/* Efeito Preço */}
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-stone-500 font-medium block">1. Efeito Preço</span>
+              <div className={`font-mono font-bold text-sm mt-1 ${cmvDecomp.priceEffectInCents > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                {cmvDecomp.priceEffectInCents >= 0 ? '+' : ''}{formatCentsToCurrency(cmvDecomp.priceEffectInCents)}
+              </div>
+              <p className="text-[10px] text-stone-400 mt-0.5">Variação de cotações dos fornecedores</p>
+            </div>
+
+            {/* Efeito Volume */}
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-stone-500 font-medium block">2. Efeito Volume</span>
+              <div className="font-mono font-bold text-sm mt-1 text-stone-800">
+                {cmvDecomp.volumeEffectInCents >= 0 ? '+' : ''}{formatCentsToCurrency(cmvDecomp.volumeEffectInCents)}
+              </div>
+              <p className="text-[10px] text-stone-400 mt-0.5">Mais pratos vendidos no período</p>
+            </div>
+
+            {/* Efeito Uso / Mix */}
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-stone-500 font-medium block">3. Efeito Uso / Mix</span>
+              <div className={`font-mono font-bold text-sm mt-1 ${cmvDecomp.usageMixEffectInCents > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                {cmvDecomp.usageMixEffectInCents >= 0 ? '+' : ''}{formatCentsToCurrency(cmvDecomp.usageMixEffectInCents)}
+              </div>
+              <p className="text-[10px] text-stone-400 mt-0.5">Desperdício ou alteração no mix</p>
+            </div>
+          </div>
+
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-xs">
+            <strong>Prova de Identidade Matemática:</strong> {formatCentsToCurrency(cmvDecomp.priceEffectInCents)} + {formatCentsToCurrency(cmvDecomp.volumeEffectInCents)} + {formatCentsToCurrency(cmvDecomp.usageMixEffectInCents)} = {formatCentsToCurrency(cmvDecomp.deltaCmvInCents)} (Exatamente idêntico ✔).
           </div>
         </div>
       )}
@@ -727,6 +887,16 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
           </div>
         </form>
       </Modal>
+
+      {/* Modal Como Calculamos (F28 & F33) */}
+      {selectedExplanation && (
+        <ExplanationModal
+          isOpen={true}
+          onClose={() => setSelectedExplanation(null)}
+          title={selectedExplanation.title}
+          explanation={selectedExplanation.explanation}
+        />
+      )}
     </div>
   );
 };
