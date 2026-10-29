@@ -1,0 +1,6 @@
+{
+  "name": "Mise - Gestão para Comércio Alimentício",
+  "description": "Sistema de gestão e controle de margem para restaurantes, cafeterias, padarias e cozinhas. Ficha técnica, CMV real, controle de estoque e DRE gerencial.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

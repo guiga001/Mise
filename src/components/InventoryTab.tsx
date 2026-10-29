@@ -1,0 +1,736 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ * Mise — Controle de Estoque, Movimentações e Inventário Mobile
+ * Invariante: O saldo de estoque é SEMPRE derivado dos movimentos históricos.
+ */
+
+import React, { useState, useMemo } from 'react';
+import {
+  PackageSearch,
+  Plus,
+  AlertTriangle,
+  Flame,
+  ClipboardList,
+  Search,
+  ArrowDownRight,
+  ArrowUpRight,
+  History,
+  ShieldCheck,
+} from 'lucide-react';
+import { StockMovement, Ingredient, StockMovementType } from '../domain/types';
+import { calculateStockBalances, calculateAbcCurve } from '../domain/inventory';
+import { formatBaseQuantity, formatCentsToCurrency, parseCurrencyToCents } from '../domain/units';
+import { MiseDatabaseState, appendAuditLog } from '../lib/storage';
+import { Modal, ConfirmDialog } from './Modal';
+import { EmptyState } from './EmptyState';
+
+interface InventoryTabProps {
+  database: MiseDatabaseState;
+  onUpdateDatabase: (newState: MiseDatabaseState) => void;
+  onNavigateToIngredients: () => void;
+}
+
+export const InventoryTab: React.FC<InventoryTabProps> = ({
+  database,
+  onUpdateDatabase,
+  onNavigateToIngredients,
+}) => {
+  const { activeStoreId, ingredients, stockMovements, stores } = database;
+  const [searchTerm, setSearchTerm] = useState('');
+  const [viewMode, setViewMode] = useState<'BALANCES' | 'MOVEMENTS' | 'ABC' | 'COUNT'>('BALANCES');
+
+  // Modais de Movimentação
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [isWasteModalOpen, setIsWasteModalOpen] = useState(false);
+  const [isCountModalOpen, setIsCountModalOpen] = useState(false);
+
+  // Form Movimento Manual (Entrada)
+  const [selectedIngredientId, setSelectedIngredientId] = useState('');
+  const [manualQty, setManualQty] = useState('');
+  const [manualCostStr, setManualCostStr] = useState('');
+  const [manualReason, setManualReason] = useState('Entrada de ajuste inicial');
+
+  // Form Perda / Desperdício
+  const [wasteQty, setWasteQty] = useState('');
+  const [wasteReason, setWasteReason] = useState('Erro de cocção / Queima');
+
+  // Form Inventário Físico
+  const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+  const [countJustification, setCountJustification] = useState('');
+
+  const targetStoreId = activeStoreId === 'CONSOLIDATED' ? (stores[0]?.id || 'store_1') : activeStoreId;
+
+  const stockBalances = useMemo(() => {
+    return calculateStockBalances(targetStoreId, ingredients, stockMovements);
+  }, [targetStoreId, ingredients, stockMovements]);
+
+  const abcCurve = useMemo(() => {
+    return calculateAbcCurve(ingredients, stockMovements);
+  }, [ingredients, stockMovements]);
+
+  // Total em R$ do estoque
+  const totalStockValueInCents = useMemo(() => {
+    let sum = 0;
+    stockBalances.forEach(item => {
+      sum += item.totalValueInCents;
+    });
+    return sum;
+  }, [stockBalances]);
+
+  // Handler de Entrada Manual
+  const handleSaveManualEntry = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedIngredientId || !manualQty) return;
+
+    const ing = ingredients.find(i => i.id === selectedIngredientId);
+    if (!ing) return;
+
+    const qty = parseFloat(manualQty);
+    if (isNaN(qty) || qty <= 0) return;
+
+    const costInCents = manualCostStr ? parseCurrencyToCents(manualCostStr) : Math.round((qty * ing.currentUnitCostMicrocents) / 10000);
+    const unitCostMicro = Math.round((costInCents * 10000) / qty);
+
+    const movement: StockMovement = {
+      id: `mov_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      storeId: targetStoreId,
+      ingredientId: ing.id,
+      type: 'INVENTORY_ADJUSTMENT',
+      quantityInBaseUnit: qty,
+      unitCostMicrocents: unitCostMicro,
+      totalCostInCents: costInCents,
+      reason: manualReason.trim() || 'Entrada manual',
+      createdAt: new Date().toISOString(),
+      createdBy: 'Dono Gestor',
+    };
+
+    const stateWithMovement = {
+      ...database,
+      stockMovements: [movement, ...database.stockMovements],
+    };
+
+    const newState = appendAuditLog(
+      stateWithMovement,
+      'MANUAL_STOCK_ENTRY',
+      'StockMovement',
+      movement.id,
+      `Entrada de ${formatBaseQuantity(qty, ing.baseUnit)} de '${ing.name}' no valor de ${formatCentsToCurrency(costInCents)}.`
+    );
+
+    onUpdateDatabase(newState);
+    setIsManualModalOpen(false);
+    setSelectedIngredientId('');
+    setManualQty('');
+    setManualCostStr('');
+  };
+
+  // Handler de Desperdício / Perda
+  const handleSaveWaste = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedIngredientId || !wasteQty) return;
+
+    const ing = ingredients.find(i => i.id === selectedIngredientId);
+    if (!ing) return;
+
+    const qty = parseFloat(wasteQty);
+    if (isNaN(qty) || qty <= 0) return;
+
+    const totalCostInCents = Math.round((qty * ing.currentUnitCostMicrocents) / 10000);
+
+    const movement: StockMovement = {
+      id: `mov_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      storeId: targetStoreId,
+      ingredientId: ing.id,
+      type: 'WASTE',
+      quantityInBaseUnit: -qty, // Saída negativa
+      unitCostMicrocents: ing.currentUnitCostMicrocents,
+      totalCostInCents,
+      reason: wasteReason,
+      createdAt: new Date().toISOString(),
+      createdBy: 'Dono Gestor',
+    };
+
+    const stateWithWaste = {
+      ...database,
+      stockMovements: [movement, ...database.stockMovements],
+    };
+
+    const newState = appendAuditLog(
+      stateWithWaste,
+      'WASTE_RECORD',
+      'StockMovement',
+      movement.id,
+      `Desperdício de ${formatBaseQuantity(qty, ing.baseUnit)} de '${ing.name}' (${wasteReason}) gerando perda de ${formatCentsToCurrency(totalCostInCents)}.`
+    );
+
+    onUpdateDatabase(newState);
+    setIsWasteModalOpen(false);
+    setSelectedIngredientId('');
+    setWasteQty('');
+  };
+
+  // Handler de Conclusão do Inventário Físico
+  const handleCommitInventory = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newMovements: StockMovement[] = [];
+    let netDiscrepancy = 0;
+
+    for (const ing of ingredients) {
+      const inputVal = countInputs[ing.id];
+      if (inputVal !== undefined && inputVal.trim() !== '') {
+        const counted = parseFloat(inputVal);
+        if (!isNaN(counted)) {
+          const currentItem = stockBalances.get(ing.id);
+          const expected = currentItem ? currentItem.currentBalanceInBaseUnit : 0;
+          const diff = counted - expected;
+
+          if (diff !== 0) {
+            const costInCents = Math.round((Math.abs(diff) * ing.currentUnitCostMicrocents) / 10000);
+            netDiscrepancy += (diff > 0 ? costInCents : -costInCents);
+
+            newMovements.push({
+              id: `mov_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              storeId: targetStoreId,
+              ingredientId: ing.id,
+              type: 'INVENTORY_ADJUSTMENT',
+              quantityInBaseUnit: diff,
+              unitCostMicrocents: ing.currentUnitCostMicrocents,
+              totalCostInCents: costInCents,
+              reason: `Inventário Físico: contagem física de ${counted} (esperado ${expected}). ${countJustification}`,
+              createdAt: new Date().toISOString(),
+              createdBy: 'Dono Gestor',
+            });
+          }
+        }
+      }
+    }
+
+    if (newMovements.length === 0) {
+      setIsCountModalOpen(false);
+      return;
+    }
+
+    const stateWithAdjustments = {
+      ...database,
+      stockMovements: [...newMovements, ...database.stockMovements],
+    };
+
+    const newState = appendAuditLog(
+      stateWithAdjustments,
+      'COMMIT_INVENTORY_COUNT',
+      'InventoryCount',
+      `count_${Date.now()}`,
+      `Inventário físico concluído com ${newMovements.length} ajustes e discrepância líquida de ${formatCentsToCurrency(netDiscrepancy)}.`
+    );
+
+    onUpdateDatabase(newState);
+    setIsCountModalOpen(false);
+    setCountInputs({});
+    setCountJustification('');
+  };
+
+  const filteredBalances = useMemo(() => {
+    return Array.from(stockBalances.values()).filter(item => {
+      const ing = ingredients.find(i => i.id === item.ingredientId);
+      if (!ing) return false;
+      return ing.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ing.category.toLowerCase().includes(searchTerm.toLowerCase());
+    });
+  }, [stockBalances, ingredients, searchTerm]);
+
+  return (
+    <div className="py-6 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6">
+      {/* Header bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-stone-900 tracking-tight">
+            Gestão de Estoque & Inventário Físico
+          </h2>
+          <p className="text-xs text-stone-500 mt-0.5">
+            Saldo derivado de entradas e baixas · Valor Total em Estoque: <strong className="font-mono text-stone-900">{formatCentsToCurrency(totalStockValueInCents)}</strong>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsWasteModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-800 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer border border-rose-200"
+          >
+            <Flame className="w-4 h-4 text-rose-600" />
+            <span>Registrar Perda</span>
+          </button>
+          <button
+            onClick={() => setIsManualModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Entrada Manual</span>
+          </button>
+          <button
+            onClick={() => setIsCountModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+          >
+            <ClipboardList className="w-4 h-4" />
+            <span>Contagem Rápida (Celular)</span>
+          </button>
+        </div>
+      </div>
+
+      {ingredients.length === 0 ? (
+        <EmptyState
+          icon={PackageSearch}
+          title="Nenhum insumo disponível para estoque"
+          description="O estoque é gerido a partir das matérias-primas cadastradas. Cadastre os insumos que seu negócio utiliza para visualizar saldos e movimentações."
+          actionLabel="Cadastrar Insumo"
+          onAction={onNavigateToIngredients}
+        />
+      ) : (
+        <div className="space-y-4">
+          {/* View Toggles & Search */}
+          <div className="flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-stone-400 absolute left-3 top-2.5 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Buscar por nome do insumo..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3.5 py-2 text-xs rounded-lg border border-stone-200 bg-white focus:outline-none focus:ring-1 focus:ring-stone-900"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-lg">
+              <button
+                onClick={() => setViewMode('BALANCES')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  viewMode === 'BALANCES' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Saldos Atuais
+              </button>
+              <button
+                onClick={() => setViewMode('MOVEMENTS')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  viewMode === 'MOVEMENTS' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Histórico ({stockMovements.length})
+              </button>
+              <button
+                onClick={() => setViewMode('ABC')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                  viewMode === 'ABC' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Curva ABC
+              </button>
+            </div>
+          </div>
+
+          {/* VIEW: Saldos Atuais */}
+          {viewMode === 'BALANCES' && (
+            <div className="bg-white rounded-xl border border-stone-200/80 overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-stone-200 bg-stone-50/60 text-stone-500 font-semibold">
+                      <th className="py-3 px-4">Insumo</th>
+                      <th className="py-3 px-4 text-right">Saldo Físico</th>
+                      <th className="py-3 px-4 text-right">Estoque Mínimo</th>
+                      <th className="py-3 px-4 text-right">Custo Médio</th>
+                      <th className="py-3 px-4 text-right">Valor em Estoque</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {filteredBalances.map((item) => {
+                      const ing = ingredients.find(i => i.id === item.ingredientId);
+                      if (!ing) return null;
+
+                      const isNegative = item.currentBalanceInBaseUnit < 0;
+
+                      return (
+                        <tr key={item.ingredientId} className="hover:bg-stone-50/60 transition-colors">
+                          <td className="py-3 px-4">
+                            <span className="font-semibold text-stone-900">{ing.name}</span>
+                            <div className="text-[11px] text-stone-500">{ing.category}</div>
+                          </td>
+                          <td className={`py-3 px-4 text-right font-mono font-bold ${isNegative ? 'text-rose-700' : 'text-stone-900'}`}>
+                            {formatBaseQuantity(item.currentBalanceInBaseUnit, ing.baseUnit)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-stone-500">
+                            {formatBaseQuantity(item.minimumStock, ing.baseUnit)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-stone-600">
+                            {(item.currentUnitCostMicrocents / 10000).toFixed(4)} R$/{ing.baseUnit}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-semibold text-stone-900">
+                            {formatCentsToCurrency(item.totalValueInCents)}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {item.isBelowMinimum ? (
+                              <span className="text-[11px] font-bold text-rose-700 flex items-center justify-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                <span>Abaixo do Mínimo</span>
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-medium text-emerald-700">
+                                Normal
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW: Histórico de Movimentações */}
+          {viewMode === 'MOVEMENTS' && (
+            <div className="bg-white rounded-xl border border-stone-200/80 overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-stone-200 bg-stone-50/60 text-stone-500 font-semibold">
+                      <th className="py-3 px-4">Data / Hora</th>
+                      <th className="py-3 px-4">Insumo</th>
+                      <th className="py-3 px-4">Tipo</th>
+                      <th className="py-3 px-4 text-right">Quantidade</th>
+                      <th className="py-3 px-4 text-right">Valor Total</th>
+                      <th className="py-3 px-4">Motivo / Origem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {stockMovements.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-6 text-center text-stone-400">
+                          Nenhuma movimentação de estoque registrada até o momento.
+                        </td>
+                      </tr>
+                    ) : (
+                      stockMovements.map((mov) => {
+                        const ing = ingredients.find(i => i.id === mov.ingredientId);
+                        const isEntry = mov.quantityInBaseUnit > 0;
+
+                        return (
+                          <tr key={mov.id} className="hover:bg-stone-50/50">
+                            <td className="py-2.5 px-4 text-stone-500 font-mono text-[11px]">
+                              {new Date(mov.createdAt).toLocaleString('pt-BR')}
+                            </td>
+                            <td className="py-2.5 px-4 font-semibold text-stone-900">
+                              {ing ? ing.name : 'Insumo'}
+                            </td>
+                            <td className="py-2.5 px-4 text-stone-600 font-medium">
+                              {mov.type === 'PURCHASE_RECEIPT' && 'Recebimento de Compra'}
+                              {mov.type === 'SALES_CONSUMPTION' && 'Baixa por Venda'}
+                              {mov.type === 'INVENTORY_ADJUSTMENT' && 'Ajuste de Inventário'}
+                              {mov.type === 'WASTE' && 'Desperdício / Perda'}
+                              {mov.type === 'PRODUCTION_INPUT' && 'Consumo em Produção'}
+                              {mov.type === 'PRODUCTION_OUTPUT' && 'Produção Concluída'}
+                            </td>
+                            <td className={`py-2.5 px-4 text-right font-mono font-bold ${isEntry ? 'text-emerald-700' : 'text-stone-900'}`}>
+                              {isEntry ? '+' : ''}{formatBaseQuantity(mov.quantityInBaseUnit, ing ? ing.baseUnit : 'g')}
+                            </td>
+                            <td className="py-2.5 px-4 text-right font-mono text-stone-800">
+                              {formatCentsToCurrency(Math.abs(mov.totalCostInCents))}
+                            </td>
+                            <td className="py-2.5 px-4 text-stone-600 max-w-xs truncate">
+                              {mov.reason || '—'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW: Curva ABC */}
+          {viewMode === 'ABC' && (
+            <div className="bg-white rounded-xl border border-stone-200/80 p-6 shadow-2xs space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-stone-900">Curva ABC de Consumo de Insumos</h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Itens Classe A representam até 80% do valor financeiro consumido e exigem cotações e inventário semanal.
+                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-stone-200 text-stone-500 font-semibold">
+                      <th className="py-2 px-3">Classificação</th>
+                      <th className="py-2 px-3">Insumo</th>
+                      <th className="py-2 px-3 text-right">Valor Consumido</th>
+                      <th className="py-2 px-3 text-right">% Acumulada</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {abcCurve.map((item) => (
+                      <tr key={item.ingredientId} className="hover:bg-stone-50/50">
+                        <td className="py-2.5 px-3">
+                          <span className={`font-mono font-bold px-2 py-0.5 rounded text-xs ${
+                            item.classification === 'A' ? 'bg-amber-100 text-amber-900' :
+                            item.classification === 'B' ? 'bg-blue-100 text-blue-900' :
+                            'bg-stone-100 text-stone-800'
+                          }`}>
+                            Classe {item.classification}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-semibold text-stone-900">{item.name}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-semibold text-stone-800">
+                          {formatCentsToCurrency(item.totalConsumedValueInCents)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-stone-600">
+                          {item.cumulativePercentage}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal Entrada Manual */}
+      <Modal
+        isOpen={isManualModalOpen}
+        onClose={() => setIsManualModalOpen(false)}
+        title="Entrada Manual de Estoque"
+        subtitle="Registra entrada física de mercadoria no saldo sem necessidade de pedido de compras."
+      >
+        <form onSubmit={handleSaveManualEntry} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-1">
+              Selecionar Insumo *
+            </label>
+            <select
+              required
+              value={selectedIngredientId}
+              onChange={(e) => setSelectedIngredientId(e.target.value)}
+              className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-stone-900"
+            >
+              <option value="">Selecione o insumo...</option>
+              {ingredients.map(ing => (
+                <option key={ing.id} value={ing.id}>
+                  {ing.name} ({ing.baseUnit})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Quantidade na Unidade Base *
+              </label>
+              <input
+                type="number"
+                required
+                value={manualQty}
+                onChange={(e) => setManualQty(e.target.value)}
+                placeholder="Ex: 5000 (g / ml / un)"
+                className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-900"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Valor Total (R$)
+              </label>
+              <input
+                type="text"
+                value={manualCostStr}
+                onChange={(e) => setManualCostStr(e.target.value)}
+                placeholder="Ex: 85,00"
+                className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-900"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-1">
+              Motivo / Justificativa *
+            </label>
+            <input
+              type="text"
+              required
+              value={manualReason}
+              onChange={(e) => setManualReason(e.target.value)}
+              placeholder="Ex: Doação de produtor local / Saldo inicial conferido"
+              className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-900"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-100">
+            <button
+              type="button"
+              onClick={() => setIsManualModalOpen(false)}
+              className="px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+            >
+              Registrar Entrada
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal Desperdício / Perda */}
+      <Modal
+        isOpen={isWasteModalOpen}
+        onClose={() => setIsWasteModalOpen(false)}
+        title="Registrar Perda / Desperdício"
+        subtitle="Dá baixa imediata no estoque e computa o valor no CMV do período."
+      >
+        <form onSubmit={handleSaveWaste} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-1">
+              Insumo Desperdiçado *
+            </label>
+            <select
+              required
+              value={selectedIngredientId}
+              onChange={(e) => setSelectedIngredientId(e.target.value)}
+              className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-stone-900"
+            >
+              <option value="">Selecione o insumo...</option>
+              {ingredients.map(ing => (
+                <option key={ing.id} value={ing.id}>
+                  {ing.name} ({ing.baseUnit})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-1">
+              Quantidade Perdida (na Unidade Base) *
+            </label>
+            <input
+              type="number"
+              required
+              value={wasteQty}
+              onChange={(e) => setWasteQty(e.target.value)}
+              placeholder="Ex: 1500"
+              className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-900"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-1">
+              Motivo do Descarte *
+            </label>
+            <select
+              value={wasteReason}
+              onChange={(e) => setWasteReason(e.target.value)}
+              className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-stone-900"
+            >
+              <option value="Erro de cocção / Queima">Erro de cocção / Queima</option>
+              <option value="Vencimento de lote / Deterioração">Vencimento de lote / Deterioração</option>
+              <option value="Queda / Quebra de recipiente">Queda / Quebra de recipiente</option>
+              <option value="Falha de refrigeração / Câmara fria">Falha de refrigeração / Câmara fria</option>
+              <option value="Degustação e teste de cardápio">Degustação e teste de cardápio</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-100">
+            <button
+              type="button"
+              onClick={() => setIsWasteModalOpen(false)}
+              className="px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-xs font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+            >
+              Confirmar Baixa de Perda
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal Contagem Rápida no Celular (Inventário Físico) */}
+      <Modal
+        isOpen={isCountModalOpen}
+        onClose={() => setIsCountModalOpen(false)}
+        title="Inventário Físico Rápido (Contagem)"
+        subtitle="Digite o que está na prateleira ou geladeira. O sistema ajusta o estoque e gera a auditoria de quebras."
+        maxWidth="2xl"
+      >
+        <form onSubmit={handleCommitInventory} className="space-y-4">
+          <div className="max-h-72 overflow-y-auto divide-y divide-stone-100 border border-stone-200 rounded-lg">
+            {ingredients.map((ing) => {
+              const currentItem = stockBalances.get(ing.id);
+              const expected = currentItem ? currentItem.currentBalanceInBaseUnit : 0;
+              const inputVal = countInputs[ing.id] ?? '';
+
+              return (
+                <div key={ing.id} className="p-3 flex items-center justify-between gap-3 bg-white">
+                  <div>
+                    <div className="text-xs font-bold text-stone-900">{ing.name}</div>
+                    <div className="text-[11px] text-stone-500">
+                      Esperado: <span className="font-mono">{formatBaseQuantity(expected, ing.baseUnit)}</span>
+                    </div>
+                  </div>
+                  <div className="w-32 flex items-center gap-1">
+                    <input
+                      type="number"
+                      placeholder={expected.toString()}
+                      value={inputVal}
+                      onChange={(e) => setCountInputs({ ...countInputs, [ing.id]: e.target.value })}
+                      className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-300 font-mono text-right focus:outline-none focus:ring-1 focus:ring-stone-900"
+                    />
+                    <span className="text-[11px] text-stone-500 font-mono">{ing.baseUnit}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-1">
+              Observação / Justificativa da Contagem *
+            </label>
+            <input
+              type="text"
+              required
+              value={countJustification}
+              onChange={(e) => setCountJustification(e.target.value)}
+              placeholder="Ex: Fechamento semanal de domingo / Contagem física mensal"
+              className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-900"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-100">
+            <button
+              type="button"
+              onClick={() => setIsCountModalOpen(false)}
+              className="px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+            >
+              Concluir & Ajustar Saldo
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+};
