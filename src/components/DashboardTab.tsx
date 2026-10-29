@@ -45,13 +45,24 @@ import { EmptyState } from './EmptyState';
 import { TabKey } from './Navigation';
 import { DataQualityCard } from './DataQualityCard';
 import { ValueCenterCard } from './ValueCenterCard';
+import { ThermometerCard } from './ThermometerCard';
+import { MonthlyXRayModal } from './MonthlyXRayModal';
+import { MonthlyClosingModal } from './MonthlyClosingModal';
+import { ExplanationModal } from './ExplanationModal';
 import { CostSimulatorModal } from './CostSimulatorModal';
 import { NfeImportModal } from './NfeImportModal';
 import { auditDataQuality } from '../domain/data-quality';
 import { calculateUncostedRevenue } from '../domain/sales-intelligence';
 import { calculateFefoExpirationRisk } from '../domain/inventory-intelligence';
 import { calculateMarginReadjustment } from '../domain/cost-simulator';
-import { DailyTask, ValueEvent } from '../domain/insights-types';
+import {
+  calculateBusinessThermometer,
+  evaluateMonthlyClosing,
+  generateMonthlyXRayReport,
+} from '../domain/governance-reports';
+import { decomposeCmvVariance } from '../domain/cmv-decomposition';
+import { appendAuditLog } from '../lib/storage';
+import { DailyTask, ValueEvent, DomainExplanation } from '../domain/insights-types';
 import { prioritizeDailyTasks } from '../domain/value-engine';
 import { FileCode, Calculator } from 'lucide-react';
 
@@ -69,6 +80,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate
   // Modais de Inteligência
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isNfeModalOpen, setIsNfeModalOpen] = useState(false);
+  const [isXRayOpen, setIsXRayOpen] = useState(false);
+  const [isClosingOpen, setIsClosingOpen] = useState(false);
+  const [isExplanationOpen, setIsExplanationOpen] = useState(false);
+  const [activeExplanation, setActiveExplanation] = useState<{ title: string; explanation: DomainExplanation<any> } | null>(null);
 
   // Estado do Filtro de Período
   const [period, setPeriod] = useState<PeriodFilter>('30_DIAS');
@@ -521,6 +536,110 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate
     return map;
   }, [filteredSales]);
 
+  // Termômetro do Negócio (F50)
+  const thermometerResult = useMemo(() => {
+    const actualCmvPct = dre.cmvPercentage || 0;
+    const targetCmvPct = 32;
+    let marginOfSafetyPct = 25;
+    const breakEven = dre.grossMarginPercentage > 0
+      ? Math.round((dre.operatingExpensesInCents * 100) / dre.grossMarginPercentage)
+      : 0;
+    if (dre.grossRevenueInCents > 0 && breakEven > 0) {
+      marginOfSafetyPct = Math.max(0, Math.min(100, Math.round(((dre.grossRevenueInCents - breakEven) / dre.grossRevenueInCents) * 100)));
+    }
+    const totalDailyExpense = filteredPayables.length > 0 ? (dre.operatingExpensesInCents / Math.max(1, filteredPayables.length)) : 10000;
+    const endingCash = lineChartData.length > 0 ? (lineChartData[lineChartData.length - 1]?.balanceInCents || 0) : 0;
+    const cashRunwayDays = totalDailyExpense > 0 ? Math.max(1, Math.min(90, Math.round(Math.max(0, endingCash) / totalDailyExpense))) : 30;
+
+    return calculateBusinessThermometer(
+      actualCmvPct,
+      targetCmvPct,
+      marginOfSafetyPct,
+      cashRunwayDays,
+      2.5,
+      0.8
+    );
+  }, [dre, filteredPayables.length, lineChartData]);
+
+  // Fechamento Mensal Guiado (F46)
+  const currentMonthYear = useMemo(() => {
+    return dateRange.end.substring(0, 7);
+  }, [dateRange.end]);
+
+  const isCurrentPeriodLocked = useMemo(() => {
+    return (database.lockedPeriods || []).includes(currentMonthYear);
+  }, [database.lockedPeriods, currentMonthYear]);
+
+  const closingResult = useMemo(() => {
+    const salesDatesInMonth = new Set(
+      filteredSales
+        .map(s => s.periodStartDate || s.importedAt.split('T')[0])
+        .filter(d => d.startsWith(currentMonthYear))
+    );
+    const unclassifiedPayables = filteredPayables.filter(p => !p.category || p.category === 'OUTROS').length;
+    const monthCounts = (inventoryCounts || []).filter(c => c.date.startsWith(currentMonthYear)).length;
+    const uncostedPct = uncostedReport.uncostedPercentage;
+
+    return evaluateMonthlyClosing(
+      currentMonthYear,
+      salesDatesInMonth.size,
+      30,
+      unclassifiedPayables,
+      monthCounts,
+      uncostedPct,
+      isCurrentPeriodLocked
+    );
+  }, [filteredSales, currentMonthYear, filteredPayables, inventoryCounts, uncostedReport.uncostedPercentage, isCurrentPeriodLocked]);
+
+  // F52 Relatório Raio-X do Mês
+  const xrayReport = useMemo(() => {
+    const cmvDecomp = decomposeCmvVariance([], 0, 0);
+    return generateMonthlyXRayReport(
+      dateRange.label,
+      dre,
+      cmvDecomp,
+      thermometerResult.overallScore,
+      dynamicTasks,
+      valueEvents
+    );
+  }, [dateRange.label, dre, thermometerResult.overallScore, dynamicTasks, valueEvents]);
+
+  const handleLockPeriod = (monthYear: string) => {
+    if (!onUpdateDatabase) return;
+    const existing = database.lockedPeriods || [];
+    if (!existing.includes(monthYear)) {
+      const updatedState = {
+        ...database,
+        lockedPeriods: [...existing, monthYear],
+      };
+      const loggedState = appendAuditLog(
+        updatedState,
+        'LOCK_PERIOD',
+        'FinancialPeriod',
+        monthYear,
+        `Período ${monthYear} travado para fechamento e auditoria contábil.`
+      );
+      onUpdateDatabase(loggedState);
+    }
+  };
+
+  const handleUnlockPeriod = (monthYear: string, reason: string) => {
+    if (!onUpdateDatabase) return;
+    const existing = database.lockedPeriods || [];
+    const updatedState = {
+      ...database,
+      lockedPeriods: existing.filter(p => p !== monthYear),
+    };
+    const loggedState = appendAuditLog(
+      updatedState,
+      'UNLOCK_PERIOD',
+      'FinancialPeriod',
+      monthYear,
+      `Período ${monthYear} destravado com justificativa: ${reason}`
+    );
+    onUpdateDatabase(loggedState);
+  };
+
   return (
     <div className="py-6 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6">
       {/* Central de Valor e Fila Faça Hoje (F48, F49) */}
@@ -529,6 +648,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate
         events={valueEvents}
         onCompleteTask={handleCompleteTask}
         onNavigateTab={(tab) => onNavigate(tab)}
+      />
+
+      {/* Termômetro do Negócio (F50) */}
+      <ThermometerCard
+        thermometer={thermometerResult}
+        onOpenXRay={() => setIsXRayOpen(true)}
+        onOpenClosing={() => setIsClosingOpen(true)}
+        onOpenExplanation={() => {
+          setActiveExplanation({
+            title: 'F50 · Termômetro do Negócio',
+            explanation: thermometerResult.explanation,
+          });
+          setIsExplanationOpen(true);
+        }}
       />
 
       {/* Auditoria de Qualidade dos Dados (F51) */}
@@ -847,6 +980,46 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ database, onNavigate
           onImportSuccess={(newState) => {
             if (onUpdateDatabase) onUpdateDatabase(newState);
           }}
+        />
+      )}
+
+      {/* F52 Relatório Raio-X do Mês */}
+      {isXRayOpen && (
+        <MonthlyXRayModal
+          isOpen={isXRayOpen}
+          onClose={() => setIsXRayOpen(false)}
+          report={xrayReport}
+        />
+      )}
+
+      {/* F46 Fechamento Mensal Guiado */}
+      {isClosingOpen && (
+        <MonthlyClosingModal
+          isOpen={isClosingOpen}
+          onClose={() => setIsClosingOpen(false)}
+          closingData={closingResult}
+          onLockPeriod={handleLockPeriod}
+          onUnlockPeriod={handleUnlockPeriod}
+          onOpenExplanation={() => {
+            setActiveExplanation({
+              title: 'F46 · Fechamento Mensal Guiado',
+              explanation: closingResult.explanation,
+            });
+            setIsExplanationOpen(true);
+          }}
+        />
+      )}
+
+      {/* Modal Universal Como Calculamos */}
+      {isExplanationOpen && activeExplanation && (
+        <ExplanationModal
+          isOpen={isExplanationOpen}
+          onClose={() => {
+            setIsExplanationOpen(false);
+            setActiveExplanation(null);
+          }}
+          title={activeExplanation.title}
+          explanation={activeExplanation.explanation}
         />
       )}
     </div>
