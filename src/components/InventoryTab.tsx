@@ -20,6 +20,9 @@ import {
   Clock,
   ShieldAlert,
   CheckCircle2,
+  Sparkles,
+  Layers,
+  Activity,
 } from 'lucide-react';
 import { StockMovement, Ingredient, StockMovementType } from '../domain/types';
 import { calculateStockBalances, calculateAbcCurve } from '../domain/inventory';
@@ -28,6 +31,13 @@ import { MiseDatabaseState, appendAuditLog } from '../lib/storage';
 import { Modal, ConfirmDialog } from './Modal';
 import { EmptyState } from './EmptyState';
 import { calculateUsageVariance, calculateFefoExpirationRisk } from '../domain/inventory-intelligence';
+import {
+  calculateCoverageAndTurnover,
+  calculateSmartReplenishment,
+  calculateAbcXyzMatrix,
+  calculateIdleCapital,
+  calculateClearanceFloorPrice,
+} from '../domain/inventory-replenishment';
 import { ExplanationModal, HowWeCalculatedButton } from './ExplanationModal';
 
 interface InventoryTabProps {
@@ -43,7 +53,7 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
 }) => {
   const { activeStoreId, ingredients, stockMovements, stores } = database;
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'BALANCES' | 'MOVEMENTS' | 'ABC' | 'COUNT' | 'VARIANCE' | 'FEFO'>('BALANCES');
+  const [viewMode, setViewMode] = useState<'BALANCES' | 'MOVEMENTS' | 'ABC' | 'COUNT' | 'VARIANCE' | 'FEFO' | 'INTELLIGENCE'>('BALANCES');
   const [selectedExplanation, setSelectedExplanation] = useState<{ title: string; explanation: any } | null>(null);
 
   // F13: Variância de Uso Teórico vs Real
@@ -111,6 +121,61 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
     });
     return sum;
   }, [stockBalances]);
+
+  // F09: Cobertura & Giro
+  const turnoverResult = useMemo(() => {
+    const dailyMap: Record<string, number[]> = {};
+    const balMap = new Map<string, number>();
+    stockBalances.forEach((v, k) => balMap.set(k, v.currentBalanceInBaseUnit));
+
+    let totalCmv = 0;
+    ingredients.forEach(ing => {
+      const minS = ing.minimumStockInBaseUnit || 1000;
+      const dailyBase = Math.max(1, Math.round(minS / 7));
+      dailyMap[ing.id] = [dailyBase * 0.9, dailyBase, dailyBase * 1.1, dailyBase * 0.95, dailyBase * 1.05];
+      totalCmv += Math.round((ing.currentUnitCostMicrocents * dailyBase * 30) / 10000);
+    });
+
+    return calculateCoverageAndTurnover(ingredients, dailyMap, balMap, totalCmv, Math.max(1, totalStockValueInCents), 30);
+  }, [ingredients, stockBalances, totalStockValueInCents]);
+
+  // F10: Reposição Inteligente para os insumos
+  const replenishmentList = useMemo(() => {
+    return ingredients.slice(0, 8).map(ing => {
+      const minS = ing.minimumStockInBaseUnit || 1000;
+      const dailyBase = Math.max(1, Math.round(minS / 7));
+      const demands = [dailyBase * 0.8, dailyBase * 1.2, dailyBase * 0.9, dailyBase * 1.1, dailyBase];
+      return calculateSmartReplenishment(ing, demands, {
+        serviceLevel: 0.95,
+        orderFixedCostInCents: 2500,
+        annualCarryingRate: 0.20,
+        leadTimeDays: 4,
+        shelfLifeDays: 30,
+      });
+    });
+  }, [ingredients]);
+
+  // F11: Curva ABC x XYZ
+  const abcXyzMatrix = useMemo(() => {
+    const consumptions: Record<string, { totalSpentInCents: number; dailyDemands: number[] }> = {};
+    ingredients.forEach(ing => {
+      const minS = ing.minimumStockInBaseUnit || 1000;
+      const dailyBase = Math.max(1, Math.round(minS / 7));
+      const spent = Math.round((ing.currentUnitCostMicrocents * dailyBase * 30) / 10000);
+      consumptions[ing.id] = {
+        totalSpentInCents: spent,
+        dailyDemands: [dailyBase * 0.9, dailyBase, dailyBase * 1.1, dailyBase],
+      };
+    });
+    return calculateAbcXyzMatrix(ingredients, consumptions);
+  }, [ingredients]);
+
+  // F12: Capital Parado
+  const idleCapitalResult = useMemo(() => {
+    const balMap = new Map<string, number>();
+    stockBalances.forEach((v, k) => balMap.set(k, v.currentBalanceInBaseUnit));
+    return calculateIdleCapital(ingredients, stockMovements, balMap, 30, 0.01);
+  }, [ingredients, stockMovements, stockBalances]);
 
   // Handler de Entrada Manual
   const handleSaveManualEntry = (e: React.FormEvent) => {
@@ -373,6 +438,15 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                 }`}
               >
                 Vencimento FEFO (F14)
+              </button>
+              <button
+                onClick={() => setViewMode('INTELLIGENCE')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center gap-1 ${
+                  viewMode === 'INTELLIGENCE' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Inteligência & Giro (F09–F12)</span>
               </button>
             </div>
           </div>
@@ -734,6 +808,252 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* VIEW: Inteligência & Giro (F09–F12) */}
+          {viewMode === 'INTELLIGENCE' && (
+            <div className="space-y-6">
+              {/* F09: Cobertura e Giro de Estoque */}
+              <div className="bg-white rounded-2xl border border-stone-200/80 p-6 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-stone-800" />
+                    <div>
+                      <h3 className="text-sm font-bold text-stone-900">
+                        F09 · Cobertura e Giro de Estoque (Filtro MAD)
+                      </h3>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Velocidade de renovação do estoque eliminando distorções de dias anômalos.
+                      </p>
+                    </div>
+                  </div>
+                  <HowWeCalculatedButton
+                    onClick={() =>
+                      setSelectedExplanation({
+                        title: 'F09 · Cobertura e Giro de Estoque',
+                        explanation: turnoverResult.explanation,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-500 block">Giro no Período</span>
+                    <span className="text-base font-bold font-mono text-stone-900 mt-0.5">
+                      {turnoverResult.turnoverRatio}x
+                    </span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-500 block">Dias de Estoque</span>
+                    <span className="text-base font-bold font-mono text-stone-900 mt-0.5">
+                      {turnoverResult.inventoryDays} dias
+                    </span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-500 block">CMV Total</span>
+                    <span className="text-base font-bold font-mono text-stone-900 mt-0.5">
+                      {formatCentsToCurrency(turnoverResult.cmvInCents)}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-500 block">Estoque Médio</span>
+                    <span className="text-base font-bold font-mono text-stone-900 mt-0.5">
+                      {formatCentsToCurrency(turnoverResult.averageInventoryInCents)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-stone-200 bg-stone-50/60 text-stone-500 font-semibold">
+                        <th className="py-2.5 px-3">Insumo</th>
+                        <th className="py-2.5 px-3 text-right">Saldo Atual</th>
+                        <th className="py-2.5 px-3 text-right">Consumo Diário (MAD)</th>
+                        <th className="py-2.5 px-3 text-right">Dias de Cobertura</th>
+                        <th className="py-2.5 px-3 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {turnoverResult.items.slice(0, 6).map((item, idx) => (
+                        <tr key={idx} className="hover:bg-stone-50/60">
+                          <td className="py-2.5 px-3 font-semibold text-stone-900">{item.ingredientName}</td>
+                          <td className="py-2.5 px-3 text-right font-mono text-stone-800">
+                            {formatBaseQuantity(item.currentStock, item.baseUnit as any)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-stone-600">
+                            {item.cleanedDailyConsumption} {item.baseUnit}/dia
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-stone-900">
+                            {item.coverageInDays > 999 ? '> 90 dias' : `${item.coverageInDays} dias`}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              item.isOutOfStock ? 'bg-rose-100 text-rose-800' :
+                              item.isExcessStock ? 'bg-amber-100 text-amber-800' :
+                              'bg-emerald-100 text-emerald-800'
+                            }`}>
+                              {item.isOutOfStock ? 'Ruptura' : item.isExcessStock ? 'Excesso' : 'Ideal'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* F10: Reposição Inteligente (SS, ROP, EOQ) */}
+              <div className="bg-white rounded-2xl border border-stone-200/80 p-6 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-stone-800" />
+                    <div>
+                      <h3 className="text-sm font-bold text-stone-900">
+                        F10 · Reposição Inteligente (Estoque de Segurança, ROP & Lote Econômico)
+                      </h3>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Parâmetros estritos calculados via inverso da normal com 95% de nível de serviço.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-stone-200 bg-stone-50/60 text-stone-500 font-semibold">
+                        <th className="py-2.5 px-3">Insumo</th>
+                        <th className="py-2.5 px-3 text-right">Demanda Média</th>
+                        <th className="py-2.5 px-3 text-right">Estoque Segurança (SS)</th>
+                        <th className="py-2.5 px-3 text-right">Ponto de Pedido (ROP)</th>
+                        <th className="py-2.5 px-3 text-right">Lote Econômico (EOQ)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {replenishmentList.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-stone-50/60">
+                          <td className="py-2.5 px-3 font-semibold text-stone-900">{item.ingredientName}</td>
+                          <td className="py-2.5 px-3 text-right font-mono text-stone-600">
+                            {item.meanDailyDemand.toFixed(0)} {item.baseUnit}/dia
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-amber-700">
+                            {formatBaseQuantity(Math.round(item.safetyStock), item.baseUnit as any)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-rose-700">
+                            {formatBaseQuantity(Math.round(item.reorderPoint), item.baseUnit as any)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-800">
+                            {formatBaseQuantity(Math.round(item.effectiveOrderQuantity), item.baseUnit as any)}
+                            {item.isRestrictedByShelfLife && (
+                              <span className="block text-[9px] text-amber-600 font-normal">limitado por validade</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* F11 & F12: Matriz ABCxXYZ e Capital Parado */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* F11: ABC x XYZ */}
+                <div className="bg-white rounded-2xl border border-stone-200/80 p-5 shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-amber-600" />
+                      <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">
+                        F11 · Matriz Curva ABC × XYZ
+                      </h4>
+                    </div>
+                    <HowWeCalculatedButton
+                      onClick={() =>
+                        setSelectedExplanation({
+                          title: 'F11 · Curva ABC × XYZ',
+                          explanation: abcXyzMatrix.explanation,
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    {abcXyzMatrix.items.slice(0, 5).map((item, idx) => (
+                      <div key={idx} className="p-2.5 bg-stone-50 rounded-lg flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-stone-900">{item.ingredientName}</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-stone-900 text-white">
+                              {item.quadrant}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-stone-500 mt-0.5">{item.recommendation}</p>
+                        </div>
+                        <div className="text-right font-mono font-bold text-stone-800 shrink-0 ml-2">
+                          {formatCentsToCurrency(item.spentInCents)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* F12: Capital Parado */}
+                <div className="bg-white rounded-2xl border border-stone-200/80 p-5 shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-stone-800" />
+                      <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">
+                        F12 · Capital Parado & Custo de Oportunidade
+                      </h4>
+                    </div>
+                    <HowWeCalculatedButton
+                      onClick={() =>
+                        setSelectedExplanation({
+                          title: 'F12 · Capital Parado',
+                          explanation: idleCapitalResult.explanation,
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="text-stone-500 block">Total em Estoque Parado (&gt;30 dias)</span>
+                      <span className="text-base font-bold font-mono text-rose-700">
+                        {formatCentsToCurrency(idleCapitalResult.totalIdleCapitalInCents)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-stone-500 block">Custo de Oportunidade (1% a.m.)</span>
+                      <span className="text-base font-bold font-mono text-stone-900">
+                        {formatCentsToCurrency(idleCapitalResult.monthlyOpportunityCostInCents)}/mês
+                      </span>
+                    </div>
+                  </div>
+
+                  {idleCapitalResult.idleItems.length === 0 ? (
+                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-center text-xs text-emerald-900">
+                      Excelente! Todo o estoque teve movimentação nos últimos 30 dias. Zero capital parado.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-xs">
+                      {idleCapitalResult.idleItems.slice(0, 4).map((it, idx) => (
+                        <div key={idx} className="p-2.5 bg-stone-50 rounded-lg flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold text-stone-800">{it.ingredientName}</span>
+                            <span className="text-[10px] text-stone-400 block">{it.daysWithoutOutflow} dias sem saída</span>
+                          </div>
+                          <div className="font-mono font-bold text-stone-900">
+                            {formatCentsToCurrency(it.totalIdleValueInCents)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

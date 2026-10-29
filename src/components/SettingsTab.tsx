@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   FileText,
+  LogOut,
 } from 'lucide-react';
 import { Store as StoreType, User } from '../domain/types';
 import { MiseDatabaseState, appendAuditLog, purgeCompanyData } from '../lib/storage';
@@ -27,12 +28,14 @@ interface SettingsTabProps {
   database: MiseDatabaseState;
   onUpdateDatabase: (newState: MiseDatabaseState) => void;
   onResetToBootstrap: () => void;
+  onLogout?: () => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
   database,
   onUpdateDatabase,
   onResetToBootstrap,
+  onLogout,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'STORES' | 'USERS' | 'AUDIT' | 'LGPD'>('STORES');
 
@@ -227,14 +230,31 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       {/* SUBTAB: USUÁRIOS */}
       {activeSubTab === 'USERS' && (
         <div className="space-y-4">
-          <div className="flex justify-end">
-            <button
-              onClick={() => setIsUserModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors cursor-pointer shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Convidar Sócio ou Contador</span>
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-bold text-stone-900">Sócios, Donos e Gestores Cadastrados</h3>
+              <p className="text-[11px] text-stone-500">
+                Instalação monotenant: todos os acessos compartilham privilégios de gestão com auditoria individual.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-colors cursor-pointer border border-stone-200"
+                >
+                  <LogOut className="w-4 h-4 text-stone-500" />
+                  <span>Desconectar Sessão</span>
+                </button>
+              )}
+              <button
+                onClick={() => setIsUserModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Convidar Sócio ou Contador</span>
+              </button>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl border border-stone-200/80 overflow-hidden shadow-2xs">
@@ -245,19 +265,61 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   <th className="py-3 px-4">E-mail</th>
                   <th className="py-3 px-4">Papel Canônico</th>
                   <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {database.users.map((u) => (
-                  <tr key={u.id} className="hover:bg-stone-50/60">
-                    <td className="py-3 px-4 font-bold text-stone-900">{u.name}</td>
-                    <td className="py-3 px-4 font-mono text-stone-700">{u.email}</td>
-                    <td className="py-3 px-4 font-mono font-bold text-stone-900">DONO</td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="text-[11px] font-bold text-emerald-700">Ativo</span>
-                    </td>
-                  </tr>
-                ))}
+                {database.users.map((u) => {
+                  const isCurrent = u.id === database.activeUserId;
+                  return (
+                    <tr key={u.id} className="hover:bg-stone-50/60">
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-stone-900 flex items-center gap-2">
+                          <span>{u.name}</span>
+                          {isCurrent && (
+                            <span className="text-[10px] bg-stone-900 text-amber-400 font-mono font-bold px-1.5 py-0.5 rounded">
+                              Você (Ativo)
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 font-mono text-stone-700">{u.email}</td>
+                      <td className="py-3 px-4 font-mono font-bold text-stone-900">DONO</td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="text-[11px] font-bold text-emerald-700">Ativo</span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        {isCurrent ? (
+                          onLogout && (
+                            <button
+                              onClick={onLogout}
+                              className="text-stone-500 hover:text-rose-700 font-medium text-xs cursor-pointer"
+                            >
+                              Sair
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            onClick={() => {
+                              const updated = { ...database, activeUserId: u.id };
+                              const audited = appendAuditLog(
+                                updated,
+                                'USER_SWITCH',
+                                'User',
+                                u.id,
+                                `Alternou a sessão ativa para o usuário '${u.name}'.`
+                              );
+                              onUpdateDatabase(audited);
+                            }}
+                            className="text-stone-700 hover:text-stone-900 font-medium text-xs underline cursor-pointer"
+                          >
+                            Alternar para este perfil
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -12,6 +12,10 @@ import {
   SensitivityRankingResult,
   MarginReadjustmentResult,
   KitchenInflationResult,
+  ElasticitySimulationResult,
+  ElasticitySimulationPoint,
+  ChannelMinimumPriceResult,
+  ComboPricingResult,
 } from './insights-types';
 import { formatCentsToCurrency } from './units';
 
@@ -399,3 +403,322 @@ export function calculateKitchenInflationLaspeyres(
     explanation,
   };
 }
+
+/**
+ * F04: Simulador de Preço com Elasticidade Informada
+ * Varredura discreta de preços para encontrar o ponto de máximo lucro.
+ * Se elasticidade não informada, recusa com dados insuficientes.
+ */
+export function simulatePriceElasticity(
+  recipe: Recipe,
+  variableCostInCents: number,
+  baseMonthlyVolume: number,
+  elasticity?: number,
+  fixedCostsInCents = 0,
+  minDeltaPercent = -30,
+  maxDeltaPercent = 50,
+  stepPercent = 1
+): ElasticitySimulationResult {
+  const basePrice = recipe.salePriceInCents;
+
+  if (elasticity === undefined || elasticity === null) {
+    const explanation: DomainExplanation<number> = {
+      valor: 0,
+      unidade: 'centavos',
+      formula: "V' = max(0, V0 × (1 + ε × Δp%)); Lucro' = (P' - CV) × V' - CF",
+      entradas: {
+        prato: recipe.name,
+        precoBaseCentavos: basePrice,
+        custoVariavelCentavos: variableCostInCents,
+        volumeBase: baseMonthlyVolume,
+      },
+      passos: [
+        'A elasticidade-preço da demanda não foi informada pelo dono.',
+        'O cálculo exige a elasticidade (ex: -1.2 para bens elásticos ou -0.5 para inelásticos) para não inventar dados fictícios.',
+      ],
+      suficienciaDeDados: {
+        suficiente: false,
+        faltam: 'Informe o coeficiente de elasticidade-preço nas configurações ou na simulação.',
+        percentualConfiabilidade: 0,
+      },
+      confianca: 'INSUFICIENTE',
+    };
+
+    return {
+      recipeId: recipe.id,
+      recipeName: recipe.name,
+      basePriceInCents: basePrice,
+      variableCostInCents,
+      baseVolume: baseMonthlyVolume,
+      points: [],
+      explanation,
+    };
+  }
+
+  const points: ElasticitySimulationPoint[] = [];
+  let optimalPoint: ElasticitySimulationPoint | undefined = undefined;
+  let maxProfit = -Infinity;
+
+  for (let delta = minDeltaPercent; delta <= maxDeltaPercent; delta += stepPercent) {
+    const deltaRatio = delta / 100;
+    const simPrice = Math.round(basePrice * (1 + deltaRatio));
+    // volume' = volume * (1 + ε * deltaP%)
+    const volumeFactor = 1 + elasticity * deltaRatio;
+    const simVolume = Math.max(0, Math.round(baseMonthlyVolume * volumeFactor));
+    const mc = simPrice - variableCostInCents;
+    const grossProfit = mc * simVolume - fixedCostsInCents;
+
+    const pt: ElasticitySimulationPoint = {
+      deltaPercentage: delta,
+      simulatedPriceInCents: simPrice,
+      simulatedVolume: simVolume,
+      contributionMarginInCents: mc,
+      grossProfitInCents: grossProfit,
+    };
+
+    points.push(pt);
+
+    if (grossProfit > maxProfit) {
+      maxProfit = grossProfit;
+      optimalPoint = pt;
+    }
+  }
+
+  const explanation: DomainExplanation<number> = {
+    valor: optimalPoint ? optimalPoint.simulatedPriceInCents : basePrice,
+    unidade: 'centavos',
+    formula: "V' = max(0, V0 × (1 + ε × Δp%)); P* = argmax (MC' × V' - CF)",
+    entradas: {
+      prato: recipe.name,
+      precoBaseCentavos: basePrice,
+      custoVariavelCentavos: variableCostInCents,
+      volumeBase: baseMonthlyVolume,
+      elasticidade: elasticity,
+      intervaloTestado: `${minDeltaPercent}% a ${maxDeltaPercent}%`,
+    },
+    passos: [
+      `1. Preço base atual: ${formatCentsToCurrency(basePrice)} com volume mensal de ${baseMonthlyVolume} unidades.`,
+      `2. Coeficiente de elasticidade aplicado: ${elasticity}.`,
+      optimalPoint
+        ? `3. Preço ótimo encontrado: ${formatCentsToCurrency(optimalPoint.simulatedPriceInCents)} (${optimalPoint.deltaPercentage > 0 ? '+' : ''}${optimalPoint.deltaPercentage}%), gerando lucro de ${formatCentsToCurrency(optimalPoint.grossProfitInCents)} com volume estimado de ${optimalPoint.simulatedVolume} unidades.`
+        : '3. Nenhum ponto ótimo viável.',
+    ],
+    suficienciaDeDados: {
+      suficiente: true,
+      percentualConfiabilidade: 100,
+    },
+    confianca: 'ALTA',
+  };
+
+  return {
+    recipeId: recipe.id,
+    recipeName: recipe.name,
+    basePriceInCents: basePrice,
+    variableCostInCents,
+    baseVolume: baseMonthlyVolume,
+    elasticity,
+    optimalPoint,
+    points,
+    explanation,
+  };
+}
+
+/**
+ * F05: Preço Mínimo por Canal de Venda
+ * Preço_mín = (Custo_prato + Embalagem) / (1 - Margem_alvo - Comissao - Taxa_pagamento - Imposto)
+ */
+export function calculateMinimumPriceByChannel(
+  recipe: Recipe,
+  portionCostInCents: number,
+  packagingCostInCents: number,
+  targetMarginPercentage: number,
+  platformCommissionPercentage: number,
+  paymentFeePercentage: number,
+  variableTaxPercentage: number,
+  channelName = 'Canal'
+): ChannelMinimumPriceResult {
+  const directCost = portionCostInCents + packagingCostInCents;
+  
+  // Cálculo em base de alta precisão (basis points / 10000) para evitar artefatos de float
+  const deductionBps = Math.round(
+    (targetMarginPercentage +
+      platformCommissionPercentage +
+      paymentFeePercentage +
+      variableTaxPercentage) *
+      100
+  );
+
+  const denominatorBps = 10000 - deductionBps;
+
+  if (denominatorBps <= 0) {
+    const explanation: DomainExplanation<number> = {
+      valor: 0,
+      unidade: 'centavos',
+      formula: 'P_mín = (C_prato + C_emb) / (1 - Margem - Comissão - Taxa - Imposto)',
+      entradas: {
+        prato: recipe.name,
+        canal: channelName,
+        custoDiretoCentavos: directCost,
+        somaDeducoesPercentual: Number((deductionBps / 100).toFixed(2)),
+      },
+      passos: [
+        `As deduções variáveis somam ${(deductionBps / 100).toFixed(1)}%, excedendo 100% da receita.`,
+        `É matematicamente impossível manter a margem líquida de ${targetMarginPercentage}% com as taxas deste canal.`,
+      ],
+      suficienciaDeDados: {
+        suficiente: true,
+        percentualConfiabilidade: 100,
+      },
+      confianca: 'ALTA',
+    };
+
+    return {
+      channelName,
+      portionCostInCents,
+      packagingCostInCents,
+      directCostInCents: directCost,
+      targetMarginPercentage,
+      platformCommissionPercentage,
+      paymentFeePercentage,
+      variableTaxPercentage,
+      isImpossible: true,
+      minimumPriceInCents: 0,
+      channelMarginInCents: 0,
+      netMarginPercentage: 0,
+      explanation,
+    };
+  }
+
+  const minPriceInCents = Math.ceil((directCost * 10000) / denominatorBps);
+  const platformFee = Math.round((minPriceInCents * Math.round(platformCommissionPercentage * 100)) / 10000);
+  const payFee = Math.round((minPriceInCents * Math.round(paymentFeePercentage * 100)) / 10000);
+  const taxFee = Math.round((minPriceInCents * Math.round(variableTaxPercentage * 100)) / 10000);
+  const channelMarginInCents = minPriceInCents - platformFee - payFee - taxFee - directCost;
+  const netMarginPercentage = minPriceInCents > 0
+    ? Number(((channelMarginInCents / minPriceInCents) * 100).toFixed(2))
+    : 0;
+
+  const explanation: DomainExplanation<number> = {
+    valor: minPriceInCents,
+    unidade: 'centavos',
+    formula: 'P_mín = ⌈(C_prato + C_emb) / (1 - m_alvo - t_com - t_pag - t_imp)⌉',
+    entradas: {
+      prato: recipe.name,
+      canal: channelName,
+      custoPratoCentavos: portionCostInCents,
+      custoEmbalagemCentavos: packagingCostInCents,
+      custoDiretoCentavos: directCost,
+      margemAlvo: targetMarginPercentage,
+      comissao: platformCommissionPercentage,
+      taxaPagamento: paymentFeePercentage,
+      imposto: variableTaxPercentage,
+    },
+    passos: [
+      `1. Custo direto total (insumos + embalagem): ${formatCentsToCurrency(directCost)}.`,
+      `2. Taxas totais do canal: comissão (${platformCommissionPercentage}%) + pagamento (${paymentFeePercentage}%) + impostos (${variableTaxPercentage}%) + margem (${targetMarginPercentage}%) = ${(deductionBps / 100).toFixed(1)}%.`,
+      `3. Preço mínimo viável: ${formatCentsToCurrency(minPriceInCents)}.`,
+      `4. No canal ${channelName}, cada prato deixa ${formatCentsToCurrency(channelMarginInCents)} limpos (${netMarginPercentage}% de margem líquida).`,
+    ],
+    suficienciaDeDados: {
+      suficiente: true,
+      percentualConfiabilidade: 100,
+    },
+    confianca: 'ALTA',
+  };
+
+  return {
+    channelName,
+    portionCostInCents,
+    packagingCostInCents,
+    directCostInCents: directCost,
+    targetMarginPercentage,
+    platformCommissionPercentage,
+    paymentFeePercentage,
+    variableTaxPercentage,
+    isImpossible: false,
+    minimumPriceInCents: minPriceInCents,
+    channelMarginInCents,
+    netMarginPercentage,
+    explanation,
+  };
+}
+
+/**
+ * F06: Preço de Combo e Desconto Máximo Seguro
+ * Custo_combo = Σ custos. Preço_mín = Custo / (1 - Margem_mín). Desconto_máx = 1 - Preço_mín / Σ avulsos.
+ */
+export function calculateComboPricing(
+  comboName: string,
+  items: {
+    recipeId: string;
+    recipeName: string;
+    costInCents: number;
+    regularPriceInCents: number;
+  }[],
+  minimumTargetMarginPercentage: number,
+  simulatedDiscountPercentage = 15
+): ComboPricingResult {
+  const totalCost = items.reduce((acc, curr) => acc + curr.costInCents, 0);
+  const totalRegularPrice = items.reduce((acc, curr) => acc + curr.regularPriceInCents, 0);
+
+  if (minimumTargetMarginPercentage >= 100 || minimumTargetMarginPercentage <= 0) {
+    throw new Error('A margem mínima deve estar estritamente entre 0% e 100%.');
+  }
+
+  const marginFactor = 1 - minimumTargetMarginPercentage / 100;
+  const minComboPrice = Math.ceil(totalCost / marginFactor);
+
+  const maxSafeDiscount = totalRegularPrice > 0
+    ? Math.max(0, Number(((1 - (minComboPrice / totalRegularPrice)) * 100).toFixed(2)))
+    : 0;
+
+  const simDiscountFactor = 1 - simulatedDiscountPercentage / 100;
+  const simulatedComboPrice = Math.floor(totalRegularPrice * simDiscountFactor);
+  const simulatedMargin = simulatedComboPrice > 0
+    ? Number((((simulatedComboPrice - totalCost) / simulatedComboPrice) * 100).toFixed(2))
+    : 0;
+
+  const isSafe = simulatedMargin >= minimumTargetMarginPercentage;
+
+  const explanation: DomainExplanation<number> = {
+    valor: maxSafeDiscount,
+    unidade: '%',
+    formula: 'd_máx = 1 - (Custo_combo / (1 - m_mín)) / Σ P_avulsos',
+    entradas: {
+      combo: comboName,
+      totalItens: items.length,
+      custoTotalCentavos: totalCost,
+      somaPrecosAvulsosCentavos: totalRegularPrice,
+      margemMinima: minimumTargetMarginPercentage,
+      descontoSimulado: simulatedDiscountPercentage,
+    },
+    passos: [
+      `1. O combo reúne ${items.length} itens com custo total de ${formatCentsToCurrency(totalCost)} e soma de preços avulsos de ${formatCentsToCurrency(totalRegularPrice)}.`,
+      `2. Para garantir ao menos ${minimumTargetMarginPercentage}% de margem, o preço mínimo do combo é ${formatCentsToCurrency(minComboPrice)}.`,
+      `3. O desconto máximo seguro que você pode oferecer é de ${maxSafeDiscount}%.`,
+      `4. Ao desconto simulado de ${simulatedDiscountPercentage}%, o combo custa ${formatCentsToCurrency(simulatedComboPrice)} e entrega ${simulatedMargin}% de margem (${isSafe ? 'SEGURO' : 'ABAIXO DA MARGEM MÍNIMA'}).`,
+    ],
+    suficienciaDeDados: {
+      suficiente: items.length > 0,
+      faltam: items.length === 0 ? 'Nenhum item selecionado para o combo.' : undefined,
+      percentualConfiabilidade: items.length > 0 ? 100 : 0,
+    },
+    confianca: items.length > 0 ? 'ALTA' : 'INSUFICIENTE',
+  };
+
+  return {
+    comboName,
+    items,
+    totalCostInCents: totalCost,
+    totalRegularPriceInCents: totalRegularPrice,
+    minimumTargetMarginPercentage,
+    minimumComboPriceInCents: minComboPrice,
+    maxSafeDiscountPercentage: maxSafeDiscount,
+    simulatedDiscountPercentage,
+    simulatedComboPriceInCents: simulatedComboPrice,
+    simulatedMarginPercentage: simulatedMargin,
+    isSafe,
+    explanation,
+  };
+}
+

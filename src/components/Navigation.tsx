@@ -18,6 +18,8 @@ import {
   Settings,
   Store,
   ChevronDown,
+  LogOut,
+  Globe,
 } from 'lucide-react';
 import { MiseDatabaseState } from '../lib/storage';
 
@@ -37,6 +39,8 @@ interface NavigationProps {
   onSelectTab: (tab: TabKey) => void;
   database: MiseDatabaseState;
   onSelectStore: (storeId: string) => void;
+  onLogout: () => void;
+  onViewLandingPage?: () => void;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
@@ -44,6 +48,8 @@ export const Navigation: React.FC<NavigationProps> = ({
   onSelectTab,
   database,
   onSelectStore,
+  onLogout,
+  onViewLandingPage,
 }) => {
   const activeUser = database.users.find(u => u.id === database.activeUserId);
   const activeStore = database.stores.find(s => s.id === database.activeStoreId);
@@ -83,8 +89,8 @@ export const Navigation: React.FC<NavigationProps> = ({
               </div>
             </div>
 
-            {/* Store Switcher */}
-            <div className="flex items-center gap-3">
+            {/* Store Switcher & Logout */}
+            <div className="flex items-center gap-2 sm:gap-3">
               <div className="relative flex items-center">
                 <Store className="w-4 h-4 text-stone-400 absolute left-2.5 pointer-events-none" />
                 <select
@@ -101,6 +107,28 @@ export const Navigation: React.FC<NavigationProps> = ({
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-stone-500 absolute right-2 pointer-events-none" />
               </div>
+
+              {/* Botão Ver Página Inicial / Landing Page */}
+              {onViewLandingPage && (
+                <button
+                  onClick={onViewLandingPage}
+                  title="Ver Página Inicial e Apresentação Institucional"
+                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-lg border border-stone-200/80 transition-colors cursor-pointer"
+                >
+                  <Globe className="w-3.5 h-3.5 text-stone-500" />
+                  <span>Apresentação</span>
+                </button>
+              )}
+
+              {/* Botão Sair / Desconectar */}
+              <button
+                onClick={onLogout}
+                title="Desconectar sessão do usuário atual e retornar à página inicial"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-stone-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg border border-stone-200/80 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5 text-stone-500 group-hover:text-rose-600" />
+                <span className="hidden sm:inline">Desconectar</span>
+              </button>
             </div>
           </div>
 

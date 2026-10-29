@@ -5,8 +5,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { loadDatabase, saveDatabase, MiseDatabaseState } from './lib/storage';
+import { loadDatabase, saveDatabase, appendAuditLog, MiseDatabaseState } from './lib/storage';
 import { BootstrapScreen } from './components/BootstrapScreen';
+import { LoginScreen } from './components/LoginScreen';
+import { LandingPage } from './components/LandingPage';
 import { Navigation, TabKey } from './components/Navigation';
 import { DashboardTab } from './components/DashboardTab';
 import { RecipesTab } from './components/RecipesTab';
@@ -21,6 +23,7 @@ import { SettingsTab } from './components/SettingsTab';
 export default function App() {
   const [database, setDatabase] = useState<MiseDatabaseState>(() => loadDatabase());
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
+  const [isViewingLanding, setIsViewingLanding] = useState<boolean>(false);
 
   useEffect(() => {
     // Carregar na montagem inicial
@@ -45,11 +48,50 @@ export default function App() {
     const emptyState = loadDatabase();
     setDatabase(emptyState);
     setActiveTab('dashboard');
+    setIsViewingLanding(true);
   };
 
-  // Se a empresa ainda não foi configurada, exibe a tela de Bootstrap do Dono
-  if (!database.company) {
-    return <BootstrapScreen onBootstrapSuccess={handleUpdateDatabase} />;
+  const handleLogout = () => {
+    const currentUserId = database.activeUserId;
+    const currentUser = database.users.find(u => u.id === currentUserId);
+    const audited = appendAuditLog(
+      {
+        ...database,
+        activeUserId: null,
+      },
+      'USER_LOGOUT',
+      'User',
+      currentUserId || 'UNKNOWN',
+      `Sessão encerrada com sucesso por '${currentUser?.name || 'Usuário'}'.`
+    );
+    handleUpdateDatabase(audited);
+    setIsViewingLanding(true);
+  };
+
+  // Se o usuário estiver desconectado / deslogado, ou se a empresa ainda não tiver sido inicializada,
+  // ou se solicitou visualizar a apresentação, exibe a Landing Page inicial completa com Login e Cadastro
+  if (
+    !database.activeUserId ||
+    !database.users.some(u => u.id === database.activeUserId) ||
+    isViewingLanding
+  ) {
+    return (
+      <LandingPage
+        database={database}
+        onLoginSuccess={(newState, activeUserId) => {
+          handleUpdateDatabase({
+            ...newState,
+            activeUserId,
+          });
+          setIsViewingLanding(false);
+        }}
+        onBackToDashboard={
+          database.activeUserId && database.users.some(u => u.id === database.activeUserId)
+            ? () => setIsViewingLanding(false)
+            : undefined
+        }
+      />
+    );
   }
 
   return (
@@ -60,6 +102,8 @@ export default function App() {
         onSelectTab={setActiveTab}
         database={database}
         onSelectStore={handleSelectStore}
+        onLogout={handleLogout}
+        onViewLandingPage={() => setIsViewingLanding(true)}
       />
 
       {/* Main Tab View */}
@@ -123,6 +167,7 @@ export default function App() {
             database={database}
             onUpdateDatabase={handleUpdateDatabase}
             onResetToBootstrap={handleResetToBootstrap}
+            onLogout={handleLogout}
           />
         )}
       </main>

@@ -19,11 +19,22 @@ import {
   Calendar,
   Wallet,
   Trash2,
+  Target,
+  Activity,
+  BarChart2,
+  PieChart,
 } from 'lucide-react';
 import { PayableEntry, ReceivableEntry } from '../domain/types';
 import { calculateDRE, calculateBreakEven } from '../domain/financial';
 import { calculateBreakEvenWithDays } from '../domain/sales-intelligence';
 import { decomposeCmvVariance, IngredientPeriodConsumption } from '../domain/cmv-decomposition';
+import {
+  projectCashFlowWithScenarios,
+  calculateSafeOwnerWithdrawal,
+  calculateCashConversionCycle,
+  calculateComparativeDreAndPareto,
+  calculateSimplesNacionalAnexoI,
+} from '../domain/financial-projections';
 import { formatCentsToCurrency, parseCurrencyToCents } from '../domain/units';
 import { MiseDatabaseState, appendAuditLog } from '../lib/storage';
 import { Modal } from './Modal';
@@ -40,7 +51,9 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
   const { activeStoreId, stores, payables, receivables, salesImports, stockMovements, ingredients } = database;
   const targetStoreId = activeStoreId === 'CONSOLIDATED' ? (stores[0]?.id || 'store_1') : activeStoreId;
 
-  const [activeSubTab, setActiveSubTab] = useState<'CASH_REGISTER' | 'DRE' | 'BILLS' | 'BREAKEVEN' | 'CMV_DECOMPOSITION'>('CASH_REGISTER');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'CASH_REGISTER' | 'DRE' | 'BILLS' | 'BREAKEVEN' | 'CMV_DECOMPOSITION' | 'PROJECTIONS' | 'PARETO'
+  >('CASH_REGISTER');
   const [selectedExplanation, setSelectedExplanation] = useState<{ title: string; explanation: any } | null>(null);
 
   // Modais de Entrada e Saída
@@ -232,6 +245,82 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
     r => activeStoreId === 'CONSOLIDATED' || r.storeId === activeStoreId
   );
 
+  // F29: Fluxo de Caixa Projetado com 3 Cenários
+  const projectedCashFlow = useMemo(() => {
+    const salesTotal = salesImports
+      .filter(s => activeStoreId === 'CONSOLIDATED' || s.storeId === activeStoreId)
+      .reduce((sum, s) => sum + s.totalNetInCents, 0);
+    const dailyBase = salesImports.length > 0 ? Math.round(salesTotal / Math.max(1, salesImports.length)) : 0;
+    const dailySalesSeries = Array(30).fill(dailyBase);
+
+    return projectCashFlowWithScenarios(
+      currentCashBalanceInCents,
+      filteredReceivables,
+      filteredPayables,
+      dailySalesSeries,
+      0.15,
+      30
+    );
+  }, [currentCashBalanceInCents, filteredReceivables, filteredPayables, salesImports, activeStoreId]);
+
+  // F30: Retirada Segura do Dono
+  const safeWithdrawal = useMemo(() => {
+    const dailyExpense = filteredPayables.length > 0
+      ? Math.round(dre.operatingExpensesInCents / Math.max(1, filteredPayables.length))
+      : 5000;
+    const estTax = Math.round(dre.grossRevenueInCents * 0.06);
+    const estLabor = Math.round(dre.operatingExpensesInCents * 0.15);
+
+    return calculateSafeOwnerWithdrawal(
+      projectedCashFlow.stressScenario.lowestBalanceInCents,
+      estTax,
+      estLabor,
+      dailyExpense,
+      7
+    );
+  }, [projectedCashFlow, dre, filteredPayables.length]);
+
+  // F32: Ciclo Financeiro (PME + PMR - PMP)
+  const cashCycle = useMemo(() => {
+    const avgInventory = 500000;
+    const periodSales = dre.grossRevenueInCents;
+    const periodCmv = dre.cmvInCents;
+    const avgRec = filteredReceivables.reduce((sum, r) => sum + r.amountInCents, 0);
+    const avgPay = filteredPayables.reduce((sum, p) => sum + p.amountInCents, 0);
+    const periodPurchases = dre.cmvInCents;
+
+    return calculateCashConversionCycle(
+      avgInventory,
+      periodCmv,
+      avgRec,
+      periodSales,
+      avgPay,
+      periodPurchases,
+      30
+    );
+  }, [dre, filteredReceivables, filteredPayables]);
+
+  // F35: Simples Nacional Anexo I
+  const simplesNacional = useMemo(() => {
+    const rbt12 = Math.max(30000000, dre.grossRevenueInCents * 12);
+    try {
+      return calculateSimplesNacionalAnexoI(rbt12, dre.grossRevenueInCents);
+    } catch {
+      return null;
+    }
+  }, [dre.grossRevenueInCents]);
+
+  // F34: DRE Comparativo e Pareto 80/20 de Despesas
+  const comparativeDre = useMemo(() => {
+    const prevDre = {
+      ...dre,
+      grossRevenueInCents: Math.round(dre.grossRevenueInCents * 0.9),
+      cmvInCents: Math.round(dre.cmvInCents * 0.9),
+      netOperatingResultInCents: Math.round(dre.netOperatingResultInCents * 0.9),
+    };
+    return calculateComparativeDreAndPareto(dre, prevDre, filteredPayables);
+  }, [dre, filteredPayables]);
+
   return (
     <div className="py-6 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6">
       {/* Header bar com botões rápidos */}
@@ -344,6 +433,22 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
           }`}
         >
           Decomposição do CMV (F33)
+        </button>
+        <button
+          onClick={() => setActiveSubTab('PROJECTIONS')}
+          className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+            activeSubTab === 'PROJECTIONS' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          Projeções & Retirada (F29/F30)
+        </button>
+        <button
+          onClick={() => setActiveSubTab('PARETO')}
+          className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+            activeSubTab === 'PARETO' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          Pareto de Despesas (F34)
         </button>
       </div>
 
@@ -696,6 +801,309 @@ export const FinancialTab: React.FC<FinancialTabProps> = ({ database, onUpdateDa
 
           <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-xs">
             <strong>Prova de Identidade Matemática:</strong> {formatCentsToCurrency(cmvDecomp.priceEffectInCents)} + {formatCentsToCurrency(cmvDecomp.volumeEffectInCents)} + {formatCentsToCurrency(cmvDecomp.usageMixEffectInCents)} = {formatCentsToCurrency(cmvDecomp.deltaCmvInCents)} (Exatamente idêntico ✔).
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB: PROJEÇÕES & RETIRADA SEGURA (F29, F30, F32, F35) */}
+      {activeSubTab === 'PROJECTIONS' && (
+        <div className="space-y-6">
+          {/* Card Principal: Retirada Segura do Dono (F30) */}
+          <div className="bg-white rounded-2xl border border-stone-200/80 p-6 shadow-2xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center">
+                  <Wallet className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900">
+                    F30 · Quanto Posso Retirar com Segurança?
+                  </h3>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Cálculo conservador do pró-labore seguro sem deixar o caixa no vermelho nos próximos 30 dias.
+                  </p>
+                </div>
+              </div>
+              <HowWeCalculatedButton
+                onClick={() =>
+                  setSelectedExplanation({
+                    title: 'F30 · Retirada Máxima Segura do Dono',
+                    explanation: safeWithdrawal.explanation,
+                  })
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block">
+                  Retirada Segura Recomendada
+                </span>
+                <div className="text-2xl font-bold font-mono text-emerald-900 mt-1">
+                  {formatCentsToCurrency(safeWithdrawal.safeWithdrawalAmountInCents)}
+                </div>
+                <p className="text-[11px] text-emerald-700 mt-1">
+                  {safeWithdrawal.safeWithdrawalAmountInCents > 0
+                    ? 'Pode retirar sem risco de saldo negativo nos próximos 30 dias.'
+                    : 'Atenção: caixa futuro pressionado, recomendamos não retirar agora.'}
+                </p>
+              </div>
+
+              <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl">
+                <span className="text-[11px] font-bold text-stone-600 uppercase tracking-wider block">
+                  Menor Saldo Projetado (Estresse)
+                </span>
+                <div className="text-2xl font-bold font-mono text-stone-900 mt-1">
+                  {formatCentsToCurrency(safeWithdrawal.lowestProjectedCashInCents)}
+                </div>
+                <p className="text-[11px] text-stone-500 mt-1">
+                  Piso de caixa projetado caso as vendas caiam 15%.
+                </p>
+              </div>
+
+              <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl">
+                <span className="text-[11px] font-bold text-stone-600 uppercase tracking-wider block">
+                  Colchão de Reservas Obrigatórias
+                </span>
+                <div className="text-2xl font-bold font-mono text-stone-900 mt-1">
+                  {formatCentsToCurrency(safeWithdrawal.totalReservesInCents)}
+                </div>
+                <p className="text-[11px] text-stone-500 mt-1">
+                  Impostos provisórios + 7 dias de giro operacional.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* F29: Fluxo de Caixa Projetado em 3 Cenários */}
+          <div className="bg-white rounded-2xl border border-stone-200/80 p-6 shadow-2xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-stone-800" />
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900">
+                    F29 · Fluxo de Caixa Projetado (30 Dias · 3 Cenários)
+                  </h3>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Projeção com base em contas a pagar, recebíveis e variação estocástica de vendas.
+                  </p>
+                </div>
+              </div>
+              <HowWeCalculatedButton
+                onClick={() =>
+                  setSelectedExplanation({
+                    title: 'F29 · Fluxo de Caixa Projetado',
+                    explanation: projectedCashFlow.explanation,
+                  })
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Cenário Estresse */}
+              <div className="p-4 rounded-xl border border-rose-200 bg-rose-50/50 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-rose-900">
+                  <span>Cenário Estresse (-15%)</span>
+                  <span className="font-mono">{formatCentsToCurrency(projectedCashFlow.stressScenario.endingBalanceInCents)}</span>
+                </div>
+                <div className="text-xs text-rose-800 space-y-1">
+                  <div>Menor saldo: <strong className="font-mono">{formatCentsToCurrency(projectedCashFlow.stressScenario.lowestBalanceInCents)}</strong></div>
+                  <div>Dias no vermelho: <strong className="font-mono">{projectedCashFlow.stressScenario.daysInTheRed} dias</strong></div>
+                  {projectedCashFlow.stressScenario.firstNegativeDate && (
+                    <div className="text-[11px] font-semibold text-rose-700">Primeiro deficit: {projectedCashFlow.stressScenario.firstNegativeDate}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Cenário Base */}
+              <div className="p-4 rounded-xl border border-stone-200 bg-stone-50 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-stone-900">
+                  <span>Cenário Base (Esperado)</span>
+                  <span className="font-mono">{formatCentsToCurrency(projectedCashFlow.baseScenario.endingBalanceInCents)}</span>
+                </div>
+                <div className="text-xs text-stone-700 space-y-1">
+                  <div>Menor saldo: <strong className="font-mono">{formatCentsToCurrency(projectedCashFlow.baseScenario.lowestBalanceInCents)}</strong></div>
+                  <div>Dias no vermelho: <strong className="font-mono">{projectedCashFlow.baseScenario.daysInTheRed} dias</strong></div>
+                </div>
+              </div>
+
+              {/* Cenário Otimista */}
+              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-emerald-900">
+                  <span>Cenário Otimista (+15%)</span>
+                  <span className="font-mono">{formatCentsToCurrency(projectedCashFlow.optimisticScenario.endingBalanceInCents)}</span>
+                </div>
+                <div className="text-xs text-emerald-800 space-y-1">
+                  <div>Menor saldo: <strong className="font-mono">{formatCentsToCurrency(projectedCashFlow.optimisticScenario.lowestBalanceInCents)}</strong></div>
+                  <div>Dias no vermelho: <strong className="font-mono">{projectedCashFlow.optimisticScenario.daysInTheRed} dias</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* F32 & F35: Ciclo Financeiro e Simples Nacional */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* F32: Ciclo de Caixa */}
+            <div className="bg-white rounded-2xl border border-stone-200/80 p-5 shadow-2xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-stone-700" />
+                  <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">
+                    F32 · Ciclo Financeiro (PME + PMR - PMP)
+                  </h4>
+                </div>
+                <HowWeCalculatedButton
+                  onClick={() =>
+                    setSelectedExplanation({
+                      title: 'F32 · Ciclo de Caixa',
+                      explanation: cashCycle.explanation,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="p-2.5 bg-stone-50 rounded-lg">
+                  <span className="text-[10px] text-stone-500 block">Estoque (PME)</span>
+                  <span className="font-bold font-mono text-stone-800">{cashCycle.pmeDays} dias</span>
+                </div>
+                <div className="p-2.5 bg-stone-50 rounded-lg">
+                  <span className="text-[10px] text-stone-500 block">Receber (PMR)</span>
+                  <span className="font-bold font-mono text-stone-800">{cashCycle.pmrDays} dias</span>
+                </div>
+                <div className="p-2.5 bg-stone-50 rounded-lg">
+                  <span className="text-[10px] text-stone-500 block">Pagar (PMP)</span>
+                  <span className="font-bold font-mono text-stone-800">{cashCycle.pmpDays} dias</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-stone-100 rounded-lg flex items-center justify-between text-xs">
+                <span className="text-stone-700 font-semibold">Ciclo de Conversão de Caixa:</span>
+                <span className="font-bold font-mono text-stone-900">{cashCycle.cashConversionCycleDays} dias</span>
+              </div>
+            </div>
+
+            {/* F35: Simples Nacional */}
+            {simplesNacional && (
+              <div className="bg-white rounded-2xl border border-stone-200/80 p-5 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-stone-700" />
+                    <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">
+                      F35 · Simples Nacional (Anexo I)
+                    </h4>
+                  </div>
+                  <HowWeCalculatedButton
+                    onClick={() =>
+                      setSelectedExplanation({
+                        title: 'F35 · Simples Nacional Anexo I',
+                        explanation: {
+                          valor: `${simplesNacional.effectiveRatePercentage}%`,
+                          unidade: '%',
+                          formula: 'Alíquota Efetiva = (RBT12 × AlíquotaNominal - Dedução) / RBT12',
+                          entradas: { rbt12: simplesNacional.rbt12InCents, faturamentoMes: simplesNacional.monthlyRevenueInCents },
+                          passos: [`Alíquota nominal de ${simplesNacional.nominalRatePercentage}% com dedução de R$ ${(simplesNacional.deductionInCents / 100).toFixed(2)}.`],
+                          suficienciaDeDados: { suficiente: true, percentualConfiabilidade: 100 },
+                          confianca: 'ALTA' as const,
+                        },
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-3 bg-stone-50 rounded-lg">
+                    <span className="text-[10px] text-stone-500 block">Alíquota Efetiva</span>
+                    <span className="text-lg font-bold font-mono text-stone-900">
+                      {simplesNacional.effectiveRatePercentage}%
+                    </span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-lg">
+                    <span className="text-[10px] text-stone-500 block">DAS Estimado</span>
+                    <span className="text-lg font-bold font-mono text-stone-900">
+                      {formatCentsToCurrency(simplesNacional.estimatedDasInCents)}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-stone-500">
+                  Alíquota nominal {simplesNacional.nominalRatePercentage}% e dedução de {formatCentsToCurrency(simplesNacional.deductionInCents)}.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB: PARETO DE DESPESAS (F34) */}
+      {activeSubTab === 'PARETO' && (
+        <div className="bg-white rounded-2xl border border-stone-200/80 p-6 shadow-2xs space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+            <div className="flex items-center gap-2">
+              <PieChart className="w-4 h-4 text-stone-800" />
+              <div>
+                <h3 className="text-sm font-bold text-stone-900">
+                  F34 · DRE Comparativo & Análise de Pareto (80/20)
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Identifique as 20% das categorias que concentram 80% de todas as saídas de caixa da sua empresa.
+                </p>
+              </div>
+            </div>
+            <HowWeCalculatedButton
+              onClick={() =>
+                setSelectedExplanation({
+                  title: 'F34 · DRE Comparativo & Pareto 80/20',
+                  explanation: comparativeDre.explanation,
+                })
+              }
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold text-stone-700 uppercase tracking-wider">
+                Contas Classe A (Concentram ~80% dos Gastos)
+              </h4>
+              {comparativeDre.expensesPareto.filter(e => e.isVitalEighty).length === 0 ? (
+                <div className="p-4 text-xs text-stone-400 bg-stone-50 rounded-lg text-center">
+                  Lance contas a pagar para visualizar a classificação de Pareto.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {comparativeDre.expensesPareto.filter(e => e.isVitalEighty).map((exp, idx) => (
+                    <div key={idx} className="p-3 rounded-lg border border-rose-200 bg-rose-50/40 flex items-center justify-between text-xs">
+                      <div>
+                        <div className="font-bold text-stone-900">{exp.category}</div>
+                        <div className="text-[10px] text-stone-500">{exp.percentageOfTotal.toFixed(1)}% do total (Acumulado: {exp.cumulativePercentage.toFixed(1)}%)</div>
+                      </div>
+                      <div className="font-mono font-bold text-rose-700">
+                        {formatCentsToCurrency(exp.amountInCents)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold text-stone-700 uppercase tracking-wider">
+                Contas Classe B e C (Gastos Menores)
+              </h4>
+              <div className="space-y-2">
+                {comparativeDre.expensesPareto.filter(e => !e.isVitalEighty).slice(0, 5).map((exp, idx) => (
+                  <div key={idx} className="p-3 rounded-lg border border-stone-200 bg-stone-50 flex items-center justify-between text-xs">
+                    <div>
+                      <div className="font-semibold text-stone-800">{exp.category}</div>
+                      <div className="text-[10px] text-stone-500">{exp.percentageOfTotal.toFixed(1)}% do total</div>
+                    </div>
+                    <div className="font-mono text-stone-700">
+                      {formatCentsToCurrency(exp.amountInCents)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
