@@ -10,7 +10,7 @@ export interface DataSufficiency {
   percentualConfiabilidade: number; // 0 a 100
 }
 
-export interface DomainExplanation<T = number> {
+export interface DomainExplanation<T = number | string> {
   valor: T;
   unidade: string; // 'centavos', '%', 'dias', 'unidades', 'horas', 'R$/mês', 'índice'
   formula: string;

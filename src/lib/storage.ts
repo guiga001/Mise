@@ -46,6 +46,7 @@ export interface MiseDatabaseState {
   stockLots?: StockLot[];
   valueEvents?: any[];
   dailyTasks?: any[];
+  lockedPeriods?: string[]; // YYYY-MM travados em F46
 }
 
 const STORAGE_KEY = 'mise_database_state_v1';
