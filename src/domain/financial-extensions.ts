@@ -41,7 +41,7 @@ export function simulateLoanFinancing(
     const factor = i > 0
       ? (i / (1 - Math.pow(1 + i, -totalMonths)))
       : 1 / totalMonths;
-    const fixedPmt = Math.ceil(financedAmountInCents * factor);
+    const fixedPmt = Math.round(financedAmountInCents * factor);
 
     for (let m = 1; m <= totalMonths; m++) {
       const interest = Math.round(remainingBalance * i);
@@ -65,7 +65,7 @@ export function simulateLoanFinancing(
     }
   } else {
     // SAC
-    const fixedAmort = Math.ceil(financedAmountInCents / totalMonths);
+    const fixedAmort = Math.round(financedAmountInCents / totalMonths);
 
     for (let m = 1; m <= totalMonths; m++) {
       const interest = Math.round(remainingBalance * i);
@@ -257,7 +257,7 @@ export function rescheduleFlexiblePayables(
 
     items.push({
       payableId: p.id,
-      supplierName: p.supplierName,
+      supplierName: p.supplierName || p.description,
       amountInCents: p.amountInCents,
       originalDueDate: originalDate,
       suggestedDueDate: bestDate,

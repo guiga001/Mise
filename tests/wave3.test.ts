@@ -290,6 +290,7 @@ export function runWave3Tests() {
       {
         id: 'pay_1',
         description: 'Fornecedor Parceiro',
+        category: 'FORNECEDOR',
         supplierName: 'Fornecedor A',
         amountInCents: 250000, // R$ 2500
         dueDate: '2026-03-10',

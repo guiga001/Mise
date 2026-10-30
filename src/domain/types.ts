@@ -21,7 +21,7 @@ export interface Company {
 export interface Store {
   id: string;
   name: string;
-  code: string;
+  code?: string;
   address?: string;
   isMainStore: boolean;
   createdAt: string;
@@ -163,13 +163,19 @@ export interface InventoryCount {
 export interface Supplier {
   id: string;
   name: string;
+  cnpj?: string;
   cnpjOrCpf?: string;
   contactName?: string;
   phone?: string;
   email?: string;
   leadTimeDays?: number;
+  deliveryDaysOfWeek?: number[];
   paymentTerms?: string;
+  paymentTermsDays?: number;
+  minimumOrderInCents?: number;
   notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PurchaseOrderLine {
@@ -228,6 +234,7 @@ export interface PayableEntry {
   description: string;
   category: 'FORNECEDOR' | 'ALUGUEL' | 'ENERGIA_AGUA' | 'FOLHA_MÃO_DE_OBRA' | 'MANUTENÇÃO' | 'IMPOSTOS' | 'MARKETING' | 'OUTROS';
   supplierId?: string;
+  supplierName?: string;
   amountInCents: number;
   dueDate: string;
   paidDate?: string;
@@ -235,6 +242,8 @@ export interface PayableEntry {
   isRecurring?: boolean;
   notes?: string;
 }
+
+export { RecipeCycleError } from './recipe';
 
 export interface ReceivableEntry {
   id: string;
