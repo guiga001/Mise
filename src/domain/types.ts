@@ -31,6 +31,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  passwordHash?: string;
   role: UserRole;
   storeIds: string[]; // Stores they manage
   twoFactorEnabled: boolean;

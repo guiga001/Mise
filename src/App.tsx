@@ -6,6 +6,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { loadDatabase, saveDatabase, appendAuditLog, MiseDatabaseState } from './lib/storage';
+import {
+  getActiveSession,
+  loadCompanyDatabase,
+  saveCompanyDatabase,
+  logoutCurrentSession,
+} from './lib/auth';
 import { BootstrapScreen } from './components/BootstrapScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { LandingPage } from './components/LandingPage';
@@ -21,19 +27,40 @@ import { ProductionTab } from './components/ProductionTab';
 import { SettingsTab } from './components/SettingsTab';
 
 export default function App() {
-  const [database, setDatabase] = useState<MiseDatabaseState>(() => loadDatabase());
+  const [database, setDatabase] = useState<MiseDatabaseState>(() => {
+    const session = getActiveSession();
+    if (session) {
+      return loadCompanyDatabase(session.companyId);
+    }
+    const state = loadDatabase();
+    return { ...state, activeUserId: null };
+  });
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
-  const [isViewingLanding, setIsViewingLanding] = useState<boolean>(false);
+  const [isViewingLanding, setIsViewingLanding] = useState<boolean>(() => {
+    return !getActiveSession();
+  });
 
   useEffect(() => {
-    // Carregar na montagem inicial
-    const state = loadDatabase();
-    setDatabase(state);
+    // Carregar na montagem inicial com verificação de sessão ativa
+    const session = getActiveSession();
+    if (session) {
+      const state = loadCompanyDatabase(session.companyId);
+      setDatabase(state);
+      setIsViewingLanding(false);
+    } else {
+      const state = loadDatabase();
+      setDatabase({ ...state, activeUserId: null });
+      setIsViewingLanding(true);
+    }
   }, []);
 
   const handleUpdateDatabase = (newState: MiseDatabaseState) => {
     setDatabase(newState);
-    saveDatabase(newState);
+    if (newState.company?.id) {
+      saveCompanyDatabase(newState.company.id, newState);
+    } else {
+      saveDatabase(newState);
+    }
   };
 
   const handleSelectStore = (storeId: string) => {
@@ -45,26 +72,19 @@ export default function App() {
   };
 
   const handleResetToBootstrap = () => {
+    logoutCurrentSession();
     const emptyState = loadDatabase();
-    setDatabase(emptyState);
+    setDatabase({ ...emptyState, activeUserId: null });
     setActiveTab('dashboard');
     setIsViewingLanding(true);
   };
 
   const handleLogout = () => {
-    const currentUserId = database.activeUserId;
-    const currentUser = database.users.find(u => u.id === currentUserId);
-    const audited = appendAuditLog(
-      {
-        ...database,
-        activeUserId: null,
-      },
-      'USER_LOGOUT',
-      'User',
-      currentUserId || 'UNKNOWN',
-      `Sessão encerrada com sucesso por '${currentUser?.name || 'Usuário'}'.`
-    );
-    handleUpdateDatabase(audited);
+    logoutCurrentSession();
+    setDatabase((prev) => ({
+      ...prev,
+      activeUserId: null,
+    }));
     setIsViewingLanding(true);
   };
 

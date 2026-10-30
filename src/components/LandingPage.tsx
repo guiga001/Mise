@@ -147,16 +147,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {/* Right Action Buttons: ENTRAR & CADASTRAR-SE */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {registeredUser && (
-              <button
-                type="button"
-                onClick={() => openAuth('login')}
-                className="hidden lg:flex items-center gap-1.5 text-xs text-stone-600 bg-stone-100 hover:bg-stone-200 px-3 py-2 rounded-xl transition-colors cursor-pointer"
-              >
-                <Store className="w-3.5 h-3.5 text-stone-500" />
-                <span>Retomar ({registeredUser.name.split(' ')[0]})</span>
-              </button>
-            )}
 
             {/* BOTÃO ENTRAR / LOGIN */}
             <button

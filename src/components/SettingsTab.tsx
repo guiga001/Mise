@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { Store as StoreType, User } from '../domain/types';
 import { MiseDatabaseState, appendAuditLog, purgeCompanyData } from '../lib/storage';
+import { hashPassword } from '../lib/crypto';
+import { getRegisteredAccounts } from '../lib/auth';
 import { Modal, ConfirmDialog } from './Modal';
 
 interface SettingsTabProps {
@@ -52,6 +54,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   // Form Usuário (Sócio / Contador)
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [userPassword, setUserPassword] = useState('');
+  const [userInviteError, setUserInviteError] = useState('');
 
   const handleAddStore = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,30 +87,59 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   const handleInviteUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userName.trim() || !userEmail.trim()) return;
+    setUserInviteError('');
+
+    if (!userName.trim() || !userEmail.trim()) {
+      setUserInviteError('Preencha o nome e e-mail do usuário.');
+      return;
+    }
+    if (!userPassword || userPassword.length < 6) {
+      setUserInviteError('A senha inicial deve ter no mínimo 6 caracteres.');
+      return;
+    }
+
+    const cleanEmail = userEmail.trim().toLowerCase();
+    const cleanName = userName.trim();
+    const pHash = hashPassword(userPassword);
 
     const newUser: User = {
       id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: userName.trim(),
-      email: userEmail.trim().toLowerCase(),
+      name: cleanName,
+      email: cleanEmail,
+      passwordHash: pHash,
       role: 'DONO',
-      storeIds: database.stores.map(s => s.id),
+      storeIds: database.stores.map((s) => s.id),
       twoFactorEnabled: false,
       createdAt: new Date().toISOString(),
     };
+
+    // Registra conta no registro de contas do sistema
+    const accounts = getRegisteredAccounts();
+    accounts.push({
+      id: newUser.id,
+      email: cleanEmail,
+      name: cleanName,
+      companyId: database.company?.id || 'default',
+      companyName: database.company?.name || 'Mise',
+      passwordHash: pHash,
+      createdAt: newUser.createdAt,
+    });
+    localStorage.setItem('mise_accounts_registry_v1', JSON.stringify(accounts));
 
     const newState = appendAuditLog(
       { ...database, users: [...database.users, newUser] },
       'INVITE_USER',
       'User',
       newUser.id,
-      `Usuário sócio/contador '${newUser.name}' (${newUser.email}) cadastrado com papel único DONO.`
+      `Usuário sócio/contador '${newUser.name}' (${newUser.email}) cadastrado com senha e papel único DONO.`
     );
 
     onUpdateDatabase(newState);
     setIsUserModalOpen(false);
     setUserName('');
     setUserEmail('');
+    setUserPassword('');
+    setUserInviteError('');
   };
 
   const handleExportBackupJson = () => {
@@ -494,6 +527,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         subtitle="Todos os usuários convidados possuem o mesmo papel canônico DONO."
       >
         <form onSubmit={handleInviteUser} className="space-y-4">
+          {userInviteError && (
+            <div className="p-2.5 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">
+              {userInviteError}
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-stone-700 mb-1">
               Nome Completo *
@@ -518,6 +557,21 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               value={userEmail}
               onChange={(e) => setUserEmail(e.target.value)}
               placeholder="Ex: socia@restaurante.com.br"
+              className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-900"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-1">
+              Senha Inicial de Acesso (Mín. 6 caracteres) *
+            </label>
+            <input
+              type="password"
+              required
+              minLength={6}
+              value={userPassword}
+              onChange={(e) => setUserPassword(e.target.value)}
+              placeholder="Defina a senha inicial deste usuário"
               className="w-full text-xs px-3 py-2 rounded-lg border border-stone-300 focus:outline-none focus:ring-1 focus:ring-stone-900"
             />
           </div>

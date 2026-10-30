@@ -1,53 +1,56 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * Mise — Tela de Conexão / Login (Reconectar ou Alternar Usuário)
- * Permite que o Dono, Sócios ou Contadores entrem com segurança na sessão.
+ * Mise — Tela de Conexão / Login Seguro com Senha Obrigatória
+ * Cada usuário e empresa privada possui credenciais exclusivas e protegidas por SHA-256.
  */
 
 import React, { useState } from 'react';
-import { ChefHat, ShieldCheck, LogIn, User as UserIcon, Store as StoreIcon, Lock } from 'lucide-react';
+import { ChefHat, ShieldCheck, LogIn, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { MiseDatabaseState } from '../lib/storage';
-import { User } from '../domain/types';
+import { loginWithPassword } from '../lib/auth';
 
 interface LoginScreenProps {
   database: MiseDatabaseState;
-  onLoginSuccess: (userId: string) => void;
-  onResetToBootstrap?: () => void;
+  onLoginSuccess: (newState: MiseDatabaseState, userId: string) => void;
+  onGoToRegister?: () => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
-  database,
   onLoginSuccess,
-  onResetToBootstrap,
+  onGoToRegister,
 }) => {
-  const users = database.users || [];
-  const defaultUser = users[0] || null;
-
-  const [selectedUserId, setSelectedUserId] = useState<string>(
-    defaultUser ? defaultUser.id : ''
-  );
-  const [pinCode, setPinCode] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const selectedUser: User | undefined = users.find((u) => u.id === selectedUserId);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const handleConnect = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!selectedUserId) {
-      setError('Selecione um usuário para conectar ao sistema.');
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Por favor, digite seu e-mail de acesso.');
+      return;
+    }
+
+    if (!password) {
+      setError('A senha é obrigatória para acessar sua empresa privada.');
       return;
     }
 
     setIsSubmitting(true);
-    // Simulação de transição limpa
-    setTimeout(() => {
-      onLoginSuccess(selectedUserId);
+
+    try {
+      const result = loginWithPassword(cleanEmail, password);
       setIsSubmitting(false);
-    }, 150);
+      onLoginSuccess(result.database, result.account.id);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setError(err?.message || 'Falha ao conectar. Verifique seu e-mail e senha.');
+    }
   };
 
   return (
@@ -58,135 +61,101 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <ChefHat className="w-7 h-7 stroke-[2]" />
           </div>
         </div>
-        <h2 className="mt-4 text-center text-2xl font-bold tracking-tight text-stone-900">
-          {database.company?.name || 'Mise — Gestão Alimentícia'}
+        <h2 className="mt-4 text-center text-2xl font-black tracking-tight text-stone-900">
+          Mise — Gestão Alimentícia
         </h2>
         <div className="mt-1 flex items-center justify-center gap-1.5 text-xs text-stone-600">
-          <StoreIcon className="w-3.5 h-3.5 text-stone-400" />
-          <span>{database.stores.find((s) => s.isMainStore)?.name || 'Matriz'}</span>
-          <span aria-hidden="true">·</span>
-          <span>Sessão Desconectada</span>
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Acesso Privado e Criptografado por Empresa</span>
         </div>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-6 shadow-sm sm:rounded-2xl border border-stone-200/80 sm:px-10">
           <div className="mb-6 pb-4 border-b border-stone-100">
-            <div className="flex items-center gap-2 text-stone-900 font-semibold text-sm">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>Acesso Seguro ao Sistema</span>
+            <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
+              <Lock className="w-4 h-4 text-amber-600" />
+              <span>Autenticação de Usuário e Empresa</span>
             </div>
             <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-              Selecione o perfil do gestor ou sócio para reestabelecer a sessão e acessar os controles de cardápio, estoque e caixa.
+              Digite seu e-mail e sua senha exclusiva cadastrados para acessar os dados operacionais da sua empresa.
             </p>
           </div>
 
           <form onSubmit={handleConnect} className="space-y-4">
             {error && (
-              <div className="p-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">
-                {error}
+              <div className="p-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span className="leading-tight">{error}</span>
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-2">
-                Perfil de Acesso
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                E-mail Cadastrado *
               </label>
-              <div className="space-y-2">
-                {users.map((user) => {
-                  const isSelected = user.id === selectedUserId;
-                  const initials = user.name
-                    .split(' ')
-                    .map((n) => n[0])
-                    .slice(0, 2)
-                    .join('')
-                    .toUpperCase();
-
-                  return (
-                    <div
-                      key={user.id}
-                      onClick={() => setSelectedUserId(user.id)}
-                      className={`flex items-center justify-between p-3 rounded-xl border text-left cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-stone-900 bg-stone-50/80 shadow-2xs'
-                          : 'border-stone-200 hover:border-stone-300 bg-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs ${
-                            isSelected
-                              ? 'bg-stone-900 text-amber-400'
-                              : 'bg-stone-100 text-stone-600'
-                          }`}
-                        >
-                          {initials}
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-stone-900">{user.name}</div>
-                          <div className="text-[11px] text-stone-500">{user.email}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-200">
-                          {user.role}
-                        </span>
-                        <div
-                          className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                            isSelected
-                              ? 'border-stone-900 bg-stone-900 text-white'
-                              : 'border-stone-300'
-                          }`}
-                        >
-                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="relative">
+                <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-3 pointer-events-none" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu-email@restaurante.com.br"
+                  className="w-full text-xs pl-9 pr-3.5 py-2.5 rounded-lg border border-stone-300 focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 bg-white"
+                />
               </div>
             </div>
 
-            {selectedUser?.twoFactorEnabled && (
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Código de Autenticação / PIN
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
-                  <input
-                    type="password"
-                    maxLength={6}
-                    value={pinCode}
-                    onChange={(e) => setPinCode(e.target.value)}
-                    placeholder="000000"
-                    className="w-full text-sm pl-9 pr-3.5 py-2.5 rounded-lg border border-stone-300 font-mono tracking-widest focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
-                  />
-                </div>
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Senha de Acesso *
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-stone-400 absolute left-3 top-3 pointer-events-none" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Digite sua senha cadastrada"
+                  className="w-full text-xs pl-9 pr-10 py-2.5 rounded-lg border border-stone-300 focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-2.5 text-stone-400 hover:text-stone-700 transition-colors cursor-pointer"
+                  title={showPassword ? 'Ocultar senha' : 'Ver senha'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
-            )}
+            </div>
 
             <button
               type="submit"
-              disabled={isSubmitting || !selectedUserId}
-              className="w-full mt-4 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold text-white bg-stone-900 hover:bg-stone-800 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+              disabled={isSubmitting}
+              className="w-full mt-4 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
             >
               <LogIn className="w-4 h-4" />
-              <span>
-                {isSubmitting
-                  ? 'Conectando...'
-                  : selectedUser
-                  ? `Conectar como ${selectedUser.name.split(' ')[0]}`
-                  : 'Conectar ao Sistema'}
-              </span>
+              <span>{isSubmitting ? 'Verificando Senha...' : 'Entrar com Senha'}</span>
             </button>
           </form>
 
-          <div className="mt-6 pt-4 border-t border-stone-100 text-center">
-            <span className="text-[11px] text-stone-400 block">
-              Trilha imutável: cada login e logout é registrado para auditoria (LGPD).
-            </span>
-          </div>
+          {onGoToRegister && (
+            <div className="mt-6 pt-4 border-t border-stone-100 text-center">
+              <p className="text-xs text-stone-500">
+                Ainda não cadastrou sua empresa?{' '}
+                <button
+                  type="button"
+                  onClick={onGoToRegister}
+                  className="font-bold text-stone-900 hover:underline cursor-pointer"
+                >
+                  Cadastre-se aqui
+                </button>
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
