@@ -39,10 +39,27 @@ atendimentoRouter.get('/session', (req: Request, res: Response) => {
 atendimentoRouter.post('/session/connect', async (req: Request, res: Response) => {
   try {
     const companyId = getCompanyId(req);
-    const sessionInfo = await whatsappManager.connectSession(companyId);
+    const forceNew = Boolean(req.body?.forceNew);
+    const sessionInfo = await whatsappManager.connectSession(companyId, forceNew);
     res.json(sessionInfo);
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Falha ao iniciar conexão WhatsApp' });
+  }
+});
+
+// 2.1 Gerar Código de Pareamento Numérico (Pairing Code)
+atendimentoRouter.post('/session/pairing-code', async (req: Request, res: Response) => {
+  try {
+    const companyId = getCompanyId(req);
+    const { phoneNumber } = req.body;
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'Número de telefone é obrigatório para gerar o código de pareamento.' });
+    }
+    const code = await whatsappManager.requestPairingCode(companyId, phoneNumber);
+    const sessionInfo = whatsappManager.getSessionInfo(companyId);
+    res.json({ code, sessionInfo });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Falha ao gerar código de pareamento' });
   }
 });
 

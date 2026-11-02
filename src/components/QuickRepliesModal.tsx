@@ -36,6 +36,7 @@ export const QuickRepliesModal: React.FC<QuickRepliesModalProps> = ({
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -46,6 +47,7 @@ export const QuickRepliesModal: React.FC<QuickRepliesModalProps> = ({
     : quickReplies.filter((q) => (q.category || 'Geral') === activeCategory);
 
   const startEdit = (reply?: QuickReply) => {
+    setErrorMsg(null);
     if (reply) {
       setEditingId(reply.id);
       setShortcut(reply.shortcut);
@@ -67,6 +69,7 @@ export const QuickRepliesModal: React.FC<QuickRepliesModalProps> = ({
     if (!title.trim() || !content.trim()) return;
 
     setLoading(true);
+    setErrorMsg(null);
     try {
       await atendimentoApi.saveQuickReply(companyId, {
         id: editingId || undefined,
@@ -77,20 +80,20 @@ export const QuickRepliesModal: React.FC<QuickRepliesModalProps> = ({
       });
       setIsEditing(false);
       onReload();
-    } catch (err) {
-      alert('Erro ao salvar resposta rápida: ' + String(err));
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Erro ao salvar resposta rápida.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Deseja excluir este atalho de resposta rápida?')) return;
+    setErrorMsg(null);
     try {
       await atendimentoApi.deleteQuickReply(companyId, id);
       onReload();
-    } catch (err) {
-      alert('Erro ao excluir: ' + String(err));
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Erro ao excluir resposta rápida.');
     }
   };
 

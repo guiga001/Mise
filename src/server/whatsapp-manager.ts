@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Mise Atendimento — Gerenciador de Sessões WhatsApp por Restaurante (Baileys)
  * Cada restaurante possui sua própria sessão, QR Code exclusivo e diretório de autenticação isolado.
+ * Sincroniza automaticamente todo o histórico de conversas, contatos e mensagens ao conectar.
  */
 
 import path from 'path';
@@ -12,8 +13,9 @@ import pino from 'pino';
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  Browsers,
   WASocket,
-  proto,
 } from '@whiskeysockets/baileys';
 import { WhatsAppConnectionStatus, WhatsAppSessionInfo, WhatsAppMessage } from '../domain/atendimento-types';
 import { atendimentoStore } from './atendimento-store';
@@ -39,6 +41,7 @@ interface CompanySessionState {
   lastDisconnectReason?: string;
   batteryLevel?: number;
   qrRaw?: string;
+  pairingCode?: string;
 }
 
 export type WhatsAppEventType =
@@ -56,9 +59,25 @@ export interface WhatsAppEventPayload {
 export class WhatsAppManager {
   private sessions: Map<string, CompanySessionState> = new Map();
   private listeners: Map<string, Set<(event: WhatsAppEventPayload) => void>> = new Map();
+  private cachedVersion: [number, number, number] | null = null;
 
   constructor() {
     ensureSessionsDir();
+  }
+
+  private async getBaileysVersion(): Promise<[number, number, number]> {
+    if (this.cachedVersion) return this.cachedVersion;
+    try {
+      const { version } = await fetchLatestBaileysVersion();
+      if (Array.isArray(version) && version.length === 3) {
+        this.cachedVersion = version as [number, number, number];
+        return this.cachedVersion;
+      }
+    } catch (e) {
+      console.warn('[WhatsApp] Falha ao consultar versão mais recente de Baileys, usando versão padrão estável.');
+    }
+    this.cachedVersion = [2, 3000, 1043857760];
+    return this.cachedVersion;
   }
 
   private getSessionDir(companyId: string): string {
@@ -74,14 +93,9 @@ export class WhatsAppManager {
   getSessionInfo(companyId: string): WhatsAppSessionInfo {
     const s = this.sessions.get(companyId);
     if (!s) {
-      // Verifica se existem credenciais prévias salvas no disco
-      const dir = this.getSessionDir(companyId);
-      const credsFile = path.join(dir, 'creds.json');
-      const hasSavedCreds = fs.existsSync(credsFile);
-
       return {
         companyId,
-        status: hasSavedCreds ? 'DISCONNECTED' : 'DISCONNECTED',
+        status: 'DISCONNECTED',
       };
     }
 
@@ -96,6 +110,7 @@ export class WhatsAppManager {
       connectedAt: s.connectedAt,
       lastDisconnectReason: s.lastDisconnectReason,
       batteryLevel: s.batteryLevel,
+      pairingCode: s.pairingCode,
     };
   }
 
@@ -131,22 +146,316 @@ export class WhatsAppManager {
     }
   }
 
+  // Processar mensagem histórica ou em tempo real e armazenar no banco
+  private processHistoricalMessage(
+    companyId: string,
+    msg: any,
+    sessionState: CompanySessionState
+  ) {
+    if (!msg || !msg.key) return;
+    const remoteJid = msg.key.remoteJid || '';
+    if (!remoteJid || remoteJid === 'status@broadcast') return;
+    if (!remoteJid.endsWith('@s.whatsapp.net') && !remoteJid.endsWith('@g.us')) return;
+
+    const isGroup = remoteJid.endsWith('@g.us');
+    const cleanPhone = isGroup ? remoteJid : remoteJid.replace('@s.whatsapp.net', '');
+    const customerName = msg.pushName || cleanPhone;
+    const fromMe = Boolean(msg.key.fromMe);
+
+    // Extrai conteúdo do texto
+    let text =
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text ||
+      msg.message?.imageMessage?.caption ||
+      msg.message?.videoMessage?.caption ||
+      '';
+
+    let messageType: 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'AUDIO' = 'TEXT';
+    if (msg.message?.imageMessage) messageType = 'IMAGE';
+    if (msg.message?.documentMessage) messageType = 'DOCUMENT';
+    if (msg.message?.audioMessage) messageType = 'AUDIO';
+
+    if (!text && messageType !== 'TEXT') {
+      text = messageType === 'IMAGE' ? 'Foto recebida' : messageType === 'AUDIO' ? 'Áudio de voz' : 'Arquivo';
+    }
+
+    if (!text && !msg.message) return;
+
+    const conversation = atendimentoStore.findOrCreateConversation(
+      companyId,
+      cleanPhone,
+      customerName
+    );
+
+    const rawTs =
+      typeof msg.messageTimestamp === 'object' && msg.messageTimestamp?.low
+        ? msg.messageTimestamp.low
+        : Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000);
+    const timestamp = new Date(rawTs > 1e11 ? rawTs : rawTs * 1000).toISOString();
+
+    const messageRecord: WhatsAppMessage = {
+      id: msg.key.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      conversationId: conversation.id,
+      companyId,
+      fromMe,
+      senderPhone: fromMe ? sessionState.phoneNumber || 'Restaurante' : cleanPhone,
+      senderName: fromMe ? 'Restaurante' : customerName,
+      text: text || 'Mensagem',
+      type: messageType,
+      timestamp,
+      status: fromMe ? 'SENT' : 'DELIVERED',
+    };
+
+    atendimentoStore.addMessage(companyId, messageRecord);
+  }
+
+  // Vincular listeners comuns de evento ao socket Baileys
+  private bindSocketEvents(
+    sock: WASocket,
+    companyId: string,
+    sessionState: CompanySessionState,
+    saveCreds: () => Promise<void>
+  ) {
+    // 1. Atualização e persistência de credenciais criptografadas
+    sock.ev.on('creds.update', saveCreds);
+
+    // 2. Atualização de estado da conexão e QR Code
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        sessionState.qrRaw = qr;
+        sessionState.status = 'AWAITING_SCAN';
+        sessionState.qrExpiresAt = new Date(Date.now() + 60000).toISOString();
+
+        try {
+          sessionState.qrCodeDataUrl = await QRCode.toDataURL(qr, {
+            errorCorrectionLevel: 'M',
+            margin: 3,
+            scale: 8,
+            color: {
+              dark: '#000000',
+              light: '#ffffff',
+            },
+          });
+        } catch (qrErr) {
+          console.error('Erro ao converter QR code em imagem:', qrErr);
+        }
+
+        this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+      }
+
+      if (connection === 'connecting') {
+        sessionState.status = sessionState.qrCodeDataUrl ? 'AWAITING_SCAN' : 'CONNECTING';
+        this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+      }
+
+      if (connection === 'open') {
+        sessionState.status = 'CONNECTED';
+        sessionState.qrCodeDataUrl = undefined;
+        sessionState.qrRaw = undefined;
+        sessionState.pairingCode = undefined;
+        sessionState.connectedAt = new Date().toISOString();
+
+        if (sock.user) {
+          const rawId = sock.user.id || '';
+          const phone = rawId.split(':')[0] || rawId.split('@')[0];
+          sessionState.phoneNumber = phone;
+          sessionState.profileName = sock.user.name || undefined;
+        }
+
+        console.log(
+          `[Mise Atendimento] WhatsApp conectado com sucesso para restaurante ${companyId} (${sessionState.phoneNumber})`
+        );
+        this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+        this.broadcast(companyId, 'conversation_updated', { connected: true });
+      }
+
+      if (connection === 'close') {
+        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+
+        console.log(
+          `[Mise Atendimento] Conexão encerrada para restaurante ${companyId}. Código: ${statusCode}, isLoggedOut: ${isLoggedOut}`
+        );
+
+        sessionState.lastDisconnectReason = `Desconectado (código ${statusCode || 'fechamento normal'})`;
+
+        if (isLoggedOut) {
+          sessionState.status = 'DISCONNECTED';
+          sessionState.socket = null;
+          sessionState.phoneNumber = undefined;
+          sessionState.qrCodeDataUrl = undefined;
+          sessionState.pairingCode = undefined;
+          this.clearSessionDiskFiles(companyId);
+          this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+        } else {
+          if (sessionState.status === 'CONNECTED') {
+            sessionState.status = 'DISCONNECTED';
+            sessionState.socket = null;
+            this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+
+            // Reconexão controlada automática se a conexão caiu por oscilação de rede
+            setTimeout(() => {
+              const current = this.sessions.get(companyId);
+              if (current && current.status === 'DISCONNECTED') {
+                this.connectSession(companyId, false).catch((e) =>
+                  console.error(`Erro ao auto-reconectar empresa ${companyId}:`, e)
+                );
+              }
+            }, 3000);
+          }
+        }
+      }
+    });
+
+    // 3. Sincronização Completa de Histórico de Conversas e Mensagens (messaging-history.set)
+    sock.ev.on('messaging-history.set', ({ chats, contacts, messages }) => {
+      console.log(
+        `[Mise Atendimento] Sincronizando histórico para restaurante ${companyId}: ${chats?.length || 0} conversas, ${contacts?.length || 0} contatos, ${messages?.length || 0} mensagens.`
+      );
+
+      // Mapa de nomes de contatos para enriquecer conversas
+      const contactNameMap = new Map<string, string>();
+      if (Array.isArray(contacts)) {
+        for (const contact of contacts) {
+          if (contact.id) {
+            const name = contact.name || contact.notify || contact.verifiedName;
+            if (name) {
+              const phone = contact.id.replace('@s.whatsapp.net', '');
+              contactNameMap.set(phone, name);
+            }
+          }
+        }
+      }
+
+      // Pré-cadastrar conversas a partir dos chats retornados pelo WhatsApp
+      if (Array.isArray(chats)) {
+        for (const chat of chats) {
+          if (!chat.id || chat.id === 'status@broadcast') continue;
+          if (!chat.id.endsWith('@s.whatsapp.net') && !chat.id.endsWith('@g.us')) continue;
+          const phone = chat.id.replace('@s.whatsapp.net', '');
+          const name = chat.name || contactNameMap.get(phone) || phone;
+          atendimentoStore.findOrCreateConversation(companyId, phone, name);
+        }
+      }
+
+      // Inserir mensagens históricas ordenadas cronologicamente
+      if (Array.isArray(messages)) {
+        const sorted = [...messages].sort((a, b) => {
+          const tsA = Number(a.messageTimestamp) || 0;
+          const tsB = Number(b.messageTimestamp) || 0;
+          return tsA - tsB;
+        });
+
+        for (const msg of sorted) {
+          this.processHistoricalMessage(companyId, msg, sessionState);
+        }
+      }
+
+      // Notificar frontend via SSE para carregar a lista de conversas preenchida instantaneamente
+      this.broadcast(companyId, 'conversation_updated', { synced: true });
+    });
+
+    // 4. Upsert de chats quando novos tópicos são sincronizados
+    sock.ev.on('chats.upsert', (chats) => {
+      for (const chat of chats) {
+        if (!chat.id || chat.id === 'status@broadcast') continue;
+        if (!chat.id.endsWith('@s.whatsapp.net')) continue;
+        const phone = chat.id.replace('@s.whatsapp.net', '');
+        const name = chat.name || phone;
+        atendimentoStore.findOrCreateConversation(companyId, phone, name);
+      }
+      this.broadcast(companyId, 'conversation_updated', { synced: true });
+    });
+
+    // 5. Recebimento de mensagens em tempo real
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (type !== 'notify') return;
+
+      for (const msg of messages) {
+        if (!msg.message) continue;
+        if (msg.key.remoteJid === 'status@broadcast') continue;
+
+        const remoteJid = msg.key.remoteJid || '';
+        if (!remoteJid.endsWith('@s.whatsapp.net')) continue;
+
+        const customerPhone = remoteJid.replace('@s.whatsapp.net', '');
+        const customerName = msg.pushName || customerPhone;
+        const fromMe = Boolean(msg.key.fromMe);
+
+        let text =
+          msg.message.conversation ||
+          msg.message.extendedTextMessage?.text ||
+          msg.message.imageMessage?.caption ||
+          msg.message.videoMessage?.caption ||
+          '';
+
+        let messageType: 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'AUDIO' = 'TEXT';
+        if (msg.message.imageMessage) messageType = 'IMAGE';
+        if (msg.message.documentMessage) messageType = 'DOCUMENT';
+        if (msg.message.audioMessage) messageType = 'AUDIO';
+
+        if (!text && messageType !== 'TEXT') {
+          text = messageType === 'IMAGE' ? 'Foto recebida' : messageType === 'AUDIO' ? 'Áudio de voz' : 'Arquivo';
+        }
+
+        const conversation = atendimentoStore.findOrCreateConversation(
+          companyId,
+          customerPhone,
+          customerName
+        );
+
+        const timestamp = new Date((msg.messageTimestamp as number) * 1000 || Date.now()).toISOString();
+
+        const messageRecord: WhatsAppMessage = {
+          id: msg.key.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          conversationId: conversation.id,
+          companyId,
+          fromMe,
+          senderPhone: fromMe ? sessionState.phoneNumber || 'Restaurante' : customerPhone,
+          senderName: fromMe ? 'Restaurante' : customerName,
+          text,
+          type: messageType,
+          timestamp,
+          status: fromMe ? 'SENT' : 'DELIVERED',
+        };
+
+        atendimentoStore.addMessage(companyId, messageRecord);
+
+        this.broadcast(companyId, 'new_message', messageRecord);
+        this.broadcast(companyId, 'conversation_updated', conversation);
+      }
+    });
+  }
+
   // Iniciar conexão com WhatsApp via Baileys e gerar QR Code
-  async connectSession(companyId: string): Promise<WhatsAppSessionInfo> {
+  async connectSession(companyId: string, forceNew = false): Promise<WhatsAppSessionInfo> {
     ensureSessionsDir();
     const sessionDir = this.getSessionDir(companyId);
 
-    // Se já estiver conectado, apenas retorna a sessão
     const existing = this.sessions.get(companyId);
+
+    // Se já estiver conectado, apenas retorna a sessão
     if (existing?.socket && existing.status === 'CONNECTED') {
       return this.getSessionInfo(companyId);
     }
 
-    // Se já houver um socket iniciando ou aguardando scan, fechar antes de reiniciar
+    // Se não for forçado e já temos um QR code ativo aguardando scan, retorna o existente sem reiniciar o handshake
+    if (!forceNew && existing?.socket && existing.status === 'AWAITING_SCAN' && existing.qrCodeDataUrl) {
+      return this.getSessionInfo(companyId);
+    }
+
+    // Se houver um socket prévio aberto, fecha com segurança antes de recriar
     if (existing?.socket) {
       try {
         existing.socket.end(undefined);
       } catch (e) {}
+    }
+
+    // Se o usuário solicitou explicitamente um novo QR code (forceNew), limpa arquivos do disco para gerar novos tokens
+    if (forceNew) {
+      this.clearSessionDiskFiles(companyId);
     }
 
     const sessionState: CompanySessionState = {
@@ -159,168 +468,44 @@ export class WhatsAppManager {
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+      const version = await this.getBaileysVersion();
 
       const sock = makeWASocket({
         auth: state,
+        version,
+        browser: Browsers.ubuntu('Chrome'),
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: ['Mise Atendimento', 'Chrome', '124.0.0'],
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 25000,
+        syncFullHistory: true, // Puxa todo o histórico de conversas e mensagens
+        generateHighQualityLinkPreview: false,
+        markOnlineOnConnect: true,
       });
 
       sessionState.socket = sock;
+      this.bindSocketEvents(sock, companyId, sessionState, saveCreds);
 
-      // Evento de salvamento de credenciais
-      sock.ev.on('creds.update', saveCreds);
-
-      // Evento de atualização de conexão e QR Code
-      sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-          sessionState.qrRaw = qr;
-          sessionState.status = 'AWAITING_SCAN';
-          sessionState.qrExpiresAt = new Date(Date.now() + 50000).toISOString(); // QR do Baileys dura ~50s
-
-          try {
-            sessionState.qrCodeDataUrl = await QRCode.toDataURL(qr, {
-              margin: 2,
-              scale: 8,
-              color: {
-                dark: '#0a0a0a',
-                light: '#ffffff',
-              },
-            });
-          } catch (qrErr) {
-            console.error('Erro ao converter QR code em imagem:', qrErr);
+      // Aguarda até 3.5s para retornar a resposta HTTP já com o QR Code pronto
+      await new Promise<void>((resolve) => {
+        let isDone = false;
+        const complete = () => {
+          if (!isDone) {
+            isDone = true;
+            resolve();
           }
+        };
 
-          this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
-        }
-
-        if (connection === 'connecting') {
-          sessionState.status = sessionState.qrCodeDataUrl ? 'AWAITING_SCAN' : 'CONNECTING';
-          this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
-        }
-
-        if (connection === 'open') {
-          sessionState.status = 'CONNECTED';
-          sessionState.qrCodeDataUrl = undefined;
-          sessionState.qrRaw = undefined;
-          sessionState.connectedAt = new Date().toISOString();
-
-          // Obter dados do usuário conectado
-          if (sock.user) {
-            const rawId = sock.user.id || '';
-            const phone = rawId.split(':')[0] || rawId.split('@')[0];
-            sessionState.phoneNumber = phone;
-            sessionState.profileName = sock.user.name || undefined;
+        const updateListener = (update: any) => {
+          if (update.qr || sessionState.qrCodeDataUrl || update.connection === 'open') {
+            sock.ev.off('connection.update', updateListener);
+            complete();
           }
+        };
 
-          console.log(`[Mise Atendimento] WhatsApp conectado para empresa ${companyId} (${sessionState.phoneNumber})`);
-          this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
-        }
-
-        if (connection === 'close') {
-          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-          console.log(
-            `[Mise Atendimento] Conexão encerrada para empresa ${companyId}. Código: ${statusCode}, Reconnect: ${shouldReconnect}`
-          );
-
-          sessionState.lastDisconnectReason = `Desconectado (código ${statusCode || 'desconhecido'})`;
-
-          if (statusCode === DisconnectReason.loggedOut) {
-            // Sessão deslogada: limpar credenciais do disco
-            sessionState.status = 'DISCONNECTED';
-            sessionState.socket = null;
-            sessionState.phoneNumber = undefined;
-            sessionState.qrCodeDataUrl = undefined;
-            this.clearSessionDiskFiles(companyId);
-            this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
-          } else {
-            sessionState.status = 'DISCONNECTED';
-            sessionState.socket = null;
-            this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
-
-            // Reconexão controlada se não foi logout voluntário
-            if (shouldReconnect) {
-              setTimeout(() => {
-                const current = this.sessions.get(companyId);
-                if (current && current.status === 'DISCONNECTED') {
-                  this.connectSession(companyId).catch((e) =>
-                    console.error(`Erro ao reconectar empresa ${companyId}:`, e)
-                  );
-                }
-              }, 4000);
-            }
-          }
-        }
-      });
-
-      // Evento de recebimento de mensagens
-      sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
-
-        for (const msg of messages) {
-          if (!msg.message) continue;
-          if (msg.key.remoteJid === 'status@broadcast') continue; // Ignora status de contatos
-
-          const remoteJid = msg.key.remoteJid || '';
-          if (!remoteJid.endsWith('@s.whatsapp.net')) continue; // Foca em conversas diretas de clientes
-
-          const customerPhone = remoteJid.replace('@s.whatsapp.net', '');
-          const customerName = msg.pushName || customerPhone;
-          const fromMe = Boolean(msg.key.fromMe);
-
-          // Extrai conteúdo do texto
-          let text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.imageMessage?.caption ||
-            msg.message.videoMessage?.caption ||
-            '';
-
-          let messageType: 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'AUDIO' = 'TEXT';
-          if (msg.message.imageMessage) messageType = 'IMAGE';
-          if (msg.message.documentMessage) messageType = 'DOCUMENT';
-          if (msg.message.audioMessage) messageType = 'AUDIO';
-
-          if (!text && messageType !== 'TEXT') {
-            text = messageType === 'IMAGE' ? 'Foto recebida' : messageType === 'AUDIO' ? 'Áudio de voz' : 'Arquivo';
-          }
-
-          // Encontra ou cria a conversa isolada desta empresa
-          const conversation = atendimentoStore.findOrCreateConversation(
-            companyId,
-            customerPhone,
-            customerName
-          );
-
-          const timestamp = new Date((msg.messageTimestamp as number) * 1000 || Date.now()).toISOString();
-
-          const messageRecord: WhatsAppMessage = {
-            id: msg.key.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            conversationId: conversation.id,
-            companyId,
-            fromMe,
-            senderPhone: fromMe ? sessionState.phoneNumber || 'Restaurante' : customerPhone,
-            senderName: fromMe ? 'Restaurante' : customerName,
-            text,
-            type: messageType,
-            timestamp,
-            status: fromMe ? 'SENT' : 'DELIVERED',
-          };
-
-          atendimentoStore.addMessage(companyId, messageRecord);
-
-          // Disparar eventos em tempo real
-          this.broadcast(companyId, 'new_message', messageRecord);
-          this.broadcast(companyId, 'conversation_updated', conversation);
-        }
+        sock.ev.on('connection.update', updateListener);
+        setTimeout(complete, 3500);
       });
 
       return this.getSessionInfo(companyId);
@@ -333,17 +518,153 @@ export class WhatsAppManager {
     }
   }
 
-  // Desconectar sessão e limpar credenciais
+  // Solicitar código de pareamento numérico (Pairing Code) de 8 dígitos
+  async requestPairingCode(companyId: string, phoneNumber: string): Promise<string> {
+    // Normalização estrita do número
+    let clean = phoneNumber.replace(/\D/g, '');
+    if ((clean.length === 10 || clean.length === 11) && !clean.startsWith('55')) {
+      clean = `55${clean}`;
+    }
+
+    if (!clean || clean.length < 10) {
+      throw new Error('Informe um número de telefone válido com DDD (ex: 81999998888 ou 5581999998888).');
+    }
+
+    // Fecha qualquer conexão prévia para evitar conflito de handshake
+    const existing = this.sessions.get(companyId);
+    if (existing?.socket) {
+      try {
+        existing.socket.end(undefined);
+      } catch (e) {}
+    }
+
+    // Limpa credenciais locais para garantir creds.registered = false
+    this.clearSessionDiskFiles(companyId);
+
+    const sessionDir = this.getSessionDir(companyId);
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    const version = await this.getBaileysVersion();
+
+    const sessionState: CompanySessionState = {
+      companyId,
+      socket: null,
+      status: 'STARTING',
+    };
+    this.sessions.set(companyId, sessionState);
+    this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+
+    const sock = makeWASocket({
+      auth: state,
+      version,
+      browser: Browsers.ubuntu('Chrome'),
+      printQRInTerminal: false,
+      logger: pino({ level: 'silent' }),
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
+      syncFullHistory: true, // Puxa histórico completo assim que parear
+      generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: true,
+    });
+
+    sessionState.socket = sock;
+    this.bindSocketEvents(sock, companyId, sessionState, saveCreds);
+
+    // Aguarda o handshake estar pronto antes de chamar requestPairingCode
+    return new Promise<string>((resolve, reject) => {
+      let resolved = false;
+      let timer: NodeJS.Timeout | null = null;
+
+      const triggerPairing = async () => {
+        if (resolved) return;
+        try {
+          if (!sock.authState.creds.registered) {
+            const rawCode = await sock.requestPairingCode(clean);
+            if (!resolved) {
+              resolved = true;
+              if (timer) clearTimeout(timer);
+              const formatted =
+                rawCode.length === 8 ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}` : rawCode;
+              sessionState.pairingCode = formatted;
+              sessionState.status = 'AWAITING_SCAN';
+              this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+              resolve(formatted);
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[Mise Atendimento] Tentativa de pareamento ${companyId}: ${err?.message}`);
+          if (!resolved) {
+            // Tenta uma segunda vez após 2 segundos se for fechamento temporário
+            setTimeout(async () => {
+              if (resolved) return;
+              try {
+                const retryCode = await sock.requestPairingCode(clean);
+                resolved = true;
+                if (timer) clearTimeout(timer);
+                const formatted =
+                  retryCode.length === 8 ? `${retryCode.slice(0, 4)}-${retryCode.slice(4)}` : retryCode;
+                sessionState.pairingCode = formatted;
+                sessionState.status = 'AWAITING_SCAN';
+                this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+                resolve(formatted);
+              } catch (secondErr: any) {
+                resolved = true;
+                if (timer) clearTimeout(timer);
+                reject(
+                  new Error(
+                    secondErr?.message ||
+                      'Não foi possível obter o código de pareamento. Verifique se o número possui WhatsApp ativo.'
+                  )
+                );
+              }
+            }, 2000);
+          }
+        }
+      };
+
+      // Dispara quando o evento de conexão indicar que o handshake foi concluído
+      const onConnectionUpdate = (update: any) => {
+        if (update.qr || update.connection === 'connecting') {
+          sock.ev.off('connection.update', onConnectionUpdate);
+          setTimeout(triggerPairing, 1200);
+        }
+      };
+
+      sock.ev.on('connection.update', onConnectionUpdate);
+
+      // Fallback timer de 3s caso os eventos já tenham passado
+      setTimeout(triggerPairing, 3000);
+
+      // Timeout máximo de 25s
+      timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          sock.ev.off('connection.update', onConnectionUpdate);
+          reject(
+            new Error(
+              'Tempo esgotado ao contatar o WhatsApp. Verifique sua conexão e confirme se o número informado está correto.'
+            )
+          );
+        }
+      }, 25000);
+    });
+  }
+
+  // Desconectar sessão e limpar credenciais instantaneamente
   async disconnectSession(companyId: string): Promise<WhatsAppSessionInfo> {
     const session = this.sessions.get(companyId);
     if (session?.socket) {
       try {
-        await session.socket.logout();
-      } catch (e) {
-        try {
-          session.socket.end(undefined);
-        } catch (err) {}
-      }
+        // Encerramento com timeout rápido para não travar a requisição HTTP
+        await Promise.race([
+          session.socket.logout().catch(() => {}),
+          new Promise((r) => setTimeout(r, 1200)),
+        ]);
+      } catch (e) {}
+
+      try {
+        session.socket.end(undefined);
+      } catch (e) {}
     }
 
     this.clearSessionDiskFiles(companyId);

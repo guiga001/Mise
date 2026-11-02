@@ -101,6 +101,7 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
   const [isCreatingTag, setIsCreatingTag] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#f97316');
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Messages auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -144,9 +145,9 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
   // 2. Real-time SSE Subscription
   useEffect(() => {
     const unsubscribe = atendimentoApi.subscribeEvents(companyId, (event) => {
-      if (event.type === 'SESSION_UPDATE') {
+      if (event.type === 'session_status' || event.type === 'SESSION_UPDATE') {
         setSession(event.data);
-      } else if (event.type === 'MESSAGE_NEW') {
+      } else if (event.type === 'new_message' || event.type === 'MESSAGE_NEW') {
         const newMsg: WhatsAppMessage = event.data;
         // If current open conversation, append to list
         if (selectedConversation && selectedConversation.id === newMsg.conversationId) {
@@ -154,7 +155,11 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
           atendimentoApi.markAsRead(companyId, selectedConversation.id);
         }
         reloadData();
-      } else if (event.type === 'CONVERSATION_UPDATE' || event.type === 'CONVERSATION_NEW') {
+      } else if (
+        event.type === 'conversation_updated' ||
+        event.type === 'CONVERSATION_UPDATE' ||
+        event.type === 'CONVERSATION_NEW'
+      ) {
         reloadData();
       }
     });
@@ -230,8 +235,8 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
       const updatedMsgs = await atendimentoApi.getMessages(companyId, selectedConversation.id);
       setMessages(updatedMsgs);
       reloadData();
-    } catch (err) {
-      alert('Não foi possível enviar: ' + String(err));
+    } catch (err: any) {
+      setActionError('Não foi possível enviar a mensagem: ' + (err?.message || String(err)));
     } finally {
       setSending(false);
     }
@@ -267,8 +272,8 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
       const updated = await atendimentoApi.updateStatus(companyId, selectedConversation.id, newStatus);
       setSelectedConversation(updated);
       reloadData();
-    } catch (err) {
-      alert('Erro ao atualizar status: ' + String(err));
+    } catch (err: any) {
+      setActionError('Erro ao atualizar status: ' + (err?.message || String(err)));
     }
   };
 
@@ -285,8 +290,8 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
       );
       setSelectedConversation(updated);
       reloadData();
-    } catch (err) {
-      alert('Erro ao transferir conversa: ' + String(err));
+    } catch (err: any) {
+      setActionError('Erro ao transferir conversa: ' + (err?.message || String(err)));
     }
   };
 
@@ -302,8 +307,8 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
       const updated = await atendimentoApi.updateTags(companyId, selectedConversation.id, newTags);
       setSelectedConversation(updated);
       reloadData();
-    } catch (err) {
-      alert('Erro ao atualizar etiquetas: ' + String(err));
+    } catch (err: any) {
+      setActionError('Erro ao atualizar etiquetas: ' + (err?.message || String(err)));
     }
   };
 
@@ -320,8 +325,8 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
       setIsCreatingTag(false);
       const updatedTags = await atendimentoApi.getTags(companyId);
       setTags(updatedTags);
-    } catch (err) {
-      alert('Erro ao criar etiqueta: ' + String(err));
+    } catch (err: any) {
+      setActionError('Erro ao criar etiqueta: ' + (err?.message || String(err)));
     }
   };
 
@@ -344,8 +349,8 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
       setNewChatInitialMsg('');
       setSelectedConversation(conv);
       reloadData();
-    } catch (err) {
-      alert('Erro ao iniciar conversa: ' + String(err));
+    } catch (err: any) {
+      setActionError('Erro ao iniciar conversa: ' + (err?.message || String(err)));
     }
   };
 
@@ -455,6 +460,22 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Action Error Banner */}
+      {actionError && (
+        <div className="mx-6 mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+          <button
+            onClick={() => setActionError(null)}
+            className="p-1 text-rose-500 hover:text-rose-800 rounded-md cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main 3-Column Grid */}
       <div className="flex-1 flex overflow-hidden">

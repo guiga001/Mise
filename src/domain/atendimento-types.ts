@@ -25,6 +25,7 @@ export interface WhatsAppSessionInfo {
   connectedAt?: string;
   lastDisconnectReason?: string;
   batteryLevel?: number;
+  pairingCode?: string;
 }
 
 export type MessageType = 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'AUDIO' | 'INTERNAL_NOTE';

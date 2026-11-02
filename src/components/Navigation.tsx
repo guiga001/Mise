@@ -21,11 +21,13 @@ import {
   LogOut,
   Globe,
   MessageSquare,
+  BrainCircuit,
 } from 'lucide-react';
 import { MiseDatabaseState } from '../lib/storage';
 
 export type TabKey =
   | 'dashboard'
+  | 'intelligence'
   | 'atendimento'
   | 'recipes'
   | 'ingredients'
@@ -58,6 +60,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   const navItems = [
     { key: 'dashboard' as TabKey, label: 'Painel', icon: LayoutDashboard },
+    { key: 'intelligence' as TabKey, label: 'Inteligência', icon: BrainCircuit },
     { key: 'atendimento' as TabKey, label: 'Atendimento', icon: MessageSquare },
     { key: 'sales' as TabKey, label: 'Vendas', icon: UploadCloud },
     { key: 'purchases' as TabKey, label: 'Compras', icon: ShoppingCart },

@@ -33,11 +33,21 @@ export class AtendimentoApiClient {
     return res.json();
   }
 
-  async connectWhatsApp(companyId: string): Promise<WhatsAppSessionInfo> {
+  async connectWhatsApp(companyId: string, forceNew = false): Promise<WhatsAppSessionInfo> {
     const res = await fetch('/api/atendimento/session/connect', {
       method: 'POST',
       headers: this.getHeaders(companyId),
-      body: JSON.stringify({ companyId }),
+      body: JSON.stringify({ companyId, forceNew }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  async requestPairingCode(companyId: string, phoneNumber: string): Promise<{ code: string; sessionInfo: WhatsAppSessionInfo }> {
+    const res = await fetch('/api/atendimento/session/pairing-code', {
+      method: 'POST',
+      headers: this.getHeaders(companyId),
+      body: JSON.stringify({ companyId, phoneNumber }),
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();

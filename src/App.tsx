@@ -26,6 +26,7 @@ import { FinancialTab } from './components/FinancialTab';
 import { ProductionTab } from './components/ProductionTab';
 import { SettingsTab } from './components/SettingsTab';
 import { AtendimentoTab } from './components/AtendimentoTab';
+import { IntelligenceTab } from './components/IntelligenceTab';
 
 export default function App() {
   const [database, setDatabase] = useState<MiseDatabaseState>(() => {
@@ -134,6 +135,13 @@ export default function App() {
             database={database}
             onNavigate={(tab) => setActiveTab(tab)}
             onUpdateDatabase={handleUpdateDatabase}
+          />
+        )}
+        {activeTab === 'intelligence' && (
+          <IntelligenceTab
+            database={database}
+            onUpdateDatabase={handleUpdateDatabase}
+            onNavigateTab={(tab) => setActiveTab(tab as any)}
           />
         )}
         {activeTab === 'atendimento' && (
