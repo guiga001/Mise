@@ -181,6 +181,7 @@ atendimentoRouter.post('/conversations/:id/messages', async (req: Request, res: 
       companyId,
       conv.customerPhone,
       text.trim(),
+      conversationId,
       authorName,
       authorId
     );

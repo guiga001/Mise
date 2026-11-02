@@ -63,6 +63,51 @@ export class WhatsAppManager {
 
   constructor() {
     ensureSessionsDir();
+    // Auto-restaura sessões que já possuem credenciais ativas em disco
+    setTimeout(() => {
+      this.autoRestoreSessions();
+    }, 1000);
+  }
+
+  // Verifica se a empresa possui credenciais autenticadas gravadas em disco
+  hasStoredSession(companyId: string): boolean {
+    try {
+      const safeId = companyId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const dir = path.join(SESSIONS_DIR, safeId);
+      const credsFile = path.join(dir, 'creds.json');
+      if (fs.existsSync(credsFile)) {
+        const content = fs.readFileSync(credsFile, 'utf8');
+        return content.includes('"registered":true') || content.includes('"me"');
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
+  // Auto-restauração de todas as sessões salvas ao inicializar o servidor
+  autoRestoreSessions() {
+    try {
+      if (!fs.existsSync(SESSIONS_DIR)) return;
+      const dirs = fs.readdirSync(SESSIONS_DIR);
+      for (const d of dirs) {
+        const full = path.join(SESSIONS_DIR, d);
+        if (fs.statSync(full).isDirectory()) {
+          const credsFile = path.join(full, 'creds.json');
+          if (fs.existsSync(credsFile)) {
+            const hasAuth = this.hasStoredSession(d);
+            if (hasAuth && !this.sessions.has(d)) {
+              console.log(`[Mise Atendimento] Restaurando automaticamente sessão salva para ${d}...`);
+              this.connectSession(d, false).catch((err) =>
+                console.warn(`[Mise Atendimento] Falha ao auto-restaurar sessão ${d}:`, err?.message)
+              );
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Mise Atendimento] Erro ao escanear sessões para auto-restore:', err);
+    }
   }
 
   private async getBaileysVersion(): Promise<[number, number, number]> {
@@ -109,7 +154,16 @@ export class WhatsAppManager {
 
   // Obter status atual da sessão
   getSessionInfo(companyId: string): WhatsAppSessionInfo {
-    const s = this.sessions.get(companyId);
+    let s = this.sessions.get(companyId);
+
+    // Se não está em memória mas tem credenciais salvas em disco, auto-reconecta
+    if (!s && this.hasStoredSession(companyId)) {
+      this.connectSession(companyId, false).catch((err) =>
+        console.warn(`[Mise Atendimento] Falha na auto-reconexão para ${companyId}:`, err?.message)
+      );
+      s = this.sessions.get(companyId);
+    }
+
     if (!s) {
       return {
         companyId,
@@ -417,9 +471,18 @@ export class WhatsAppManager {
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
         const remoteJid = msg.key.remoteJid || '';
-        if (!remoteJid.endsWith('@s.whatsapp.net')) continue;
+        if (
+          !remoteJid.endsWith('@s.whatsapp.net') &&
+          !remoteJid.endsWith('@g.us') &&
+          !remoteJid.endsWith('@lid')
+        ) {
+          continue;
+        }
 
-        const customerPhone = remoteJid.replace('@s.whatsapp.net', '');
+        const isGroup = remoteJid.endsWith('@g.us');
+        const customerPhone = isGroup
+          ? remoteJid
+          : remoteJid.replace('@s.whatsapp.net', '').replace('@lid', '');
         const customerName = msg.pushName || customerPhone;
         const fromMe = Boolean(msg.key.fromMe);
 
@@ -761,29 +824,65 @@ export class WhatsAppManager {
   // Enviar mensagem de texto ou mídia para o WhatsApp do cliente
   async sendMessage(
     companyId: string,
-    customerPhone: string,
+    targetPhoneOrJid: string,
     text: string,
+    conversationId?: string,
     authorName?: string,
     authorId?: string
   ): Promise<WhatsAppMessage> {
-    const session = this.sessions.get(companyId);
+    let session = this.sessions.get(companyId);
+
+    // Se a sessão não estiver ativa em memória, tenta auto-conectar caso haja credenciais salvas em disco
+    if ((!session?.socket || session.status !== 'CONNECTED') && this.hasStoredSession(companyId)) {
+      console.log(`[Mise Atendimento] Restaurando sessão em disco antes do envio para ${companyId}...`);
+      await this.connectSession(companyId, false);
+      // Aguarda até 3 segundos pela transição para CONNECTED
+      let waits = 0;
+      while (waits < 6) {
+        await new Promise((r) => setTimeout(r, 500));
+        session = this.sessions.get(companyId);
+        if (session?.status === 'CONNECTED' && session.socket) break;
+        waits++;
+      }
+    }
+
     if (!session?.socket || session.status !== 'CONNECTED') {
       throw new Error(
         'WhatsApp não está conectado para este restaurante. Conecte escaneando o QR Code na aba Conexão.'
       );
     }
 
-    const cleanPhone = customerPhone.replace(/[^0-9]/g, '');
-    const jid = `${cleanPhone}@s.whatsapp.net`;
+    // Identificação precisa do JID de destino:
+    // 1. Grupos mantêm formato original (ex: 120363407009315697@g.us ou 5521982730011-1464784580@g.us)
+    // 2. JIDs já formatados (@s.whatsapp.net ou @lid)
+    // 3. Telefones limpos com acréscimo do DDI 55 caso necessário
+    const rawTarget = targetPhoneOrJid.trim();
+    let jid = '';
 
+    if (rawTarget.endsWith('@g.us') || rawTarget.endsWith('@s.whatsapp.net') || rawTarget.endsWith('@lid')) {
+      jid = rawTarget;
+    } else {
+      let clean = rawTarget.replace(/\D/g, '');
+      if ((clean.length === 10 || clean.length === 11) && !clean.startsWith('55')) {
+        clean = `55${clean}`;
+      }
+      jid = `${clean}@s.whatsapp.net`;
+    }
+
+    console.log(`[Mise Atendimento] Enviando mensagem WhatsApp para ${jid}...`);
     const sent = await session.socket.sendMessage(jid, { text });
 
-    const conversation = atendimentoStore.findOrCreateConversation(companyId, cleanPhone, cleanPhone);
-    const now = new Date().toISOString();
+    // Determina o ID de conversa correto
+    let convId = conversationId;
+    if (!convId) {
+      const conv = atendimentoStore.findOrCreateConversation(companyId, rawTarget, rawTarget);
+      convId = conv.id;
+    }
 
+    const now = new Date().toISOString();
     const messageRecord: WhatsAppMessage = {
       id: sent?.key?.id || `msg_${Date.now()}`,
-      conversationId: conversation.id,
+      conversationId: convId,
       companyId,
       fromMe: true,
       senderPhone: session.phoneNumber || 'Restaurante',
@@ -798,8 +897,11 @@ export class WhatsAppManager {
 
     atendimentoStore.addMessage(companyId, messageRecord);
 
+    const conv = atendimentoStore.getConversation(companyId, convId);
     this.broadcast(companyId, 'new_message', messageRecord);
-    this.broadcast(companyId, 'conversation_updated', conversation);
+    if (conv) {
+      this.broadcast(companyId, 'conversation_updated', conv);
+    }
 
     return messageRecord;
   }

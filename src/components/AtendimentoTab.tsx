@@ -105,6 +105,8 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
 
   // Messages auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const selectedConversationRef = useRef<WhatsAppConversation | null>(null);
+  selectedConversationRef.current = selectedConversation;
 
   // 1. Initial Load & Periodic Refresh
   const reloadData = async () => {
@@ -128,9 +130,10 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
       setQuickReplies(qrs);
       if (met) setMetrics(met);
 
-      // Keep selected conversation in sync
-      if (selectedConversation) {
-        const found = convs.find((c) => c.id === selectedConversation.id);
+      // Sincroniza a conversa ativa usando a ref atual para evitar sobreposição por closures antigas
+      const currentId = selectedConversationRef.current?.id;
+      if (currentId) {
+        const found = convs.find((c) => c.id === currentId);
         if (found) setSelectedConversation(found);
       }
     } catch (err) {
@@ -142,17 +145,20 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
     reloadData();
   }, [companyId, statusFilter, attendantFilter, tagFilter, searchQuery]);
 
-  // 2. Real-time SSE Subscription
+  // 2. Real-time SSE Subscription estável por empresa
   useEffect(() => {
     const unsubscribe = atendimentoApi.subscribeEvents(companyId, (event) => {
       if (event.type === 'session_status' || event.type === 'SESSION_UPDATE') {
         setSession(event.data);
       } else if (event.type === 'new_message' || event.type === 'MESSAGE_NEW') {
         const newMsg: WhatsAppMessage = event.data;
-        // If current open conversation, append to list
-        if (selectedConversation && selectedConversation.id === newMsg.conversationId) {
-          setMessages((prev) => [...prev, newMsg]);
-          atendimentoApi.markAsRead(companyId, selectedConversation.id);
+        // Se pertencer à conversa atualmente aberta, anexa à lista sem esperar polling
+        if (selectedConversationRef.current?.id === newMsg.conversationId) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          atendimentoApi.markAsRead(companyId, newMsg.conversationId).catch(() => {});
         }
         reloadData();
       } else if (
@@ -167,75 +173,96 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [companyId, selectedConversation?.id]);
+  }, [companyId]);
 
-  // 3. Load Messages when Selected Conversation changes
-  useEffect(() => {
-    if (!selectedConversation) {
-      setMessages([]);
-      return;
-    }
+  // 3. Troca de conversa com limpeza imediata de mensagens e carregamento seguro
+  const handleSelectConversation = (conv: WhatsAppConversation) => {
+    setSelectedConversation(conv);
+    selectedConversationRef.current = conv;
+    setMessages([]); // Limpa imediatamente para NUNCA exibir mensagens da conversa anterior
+    setActionError(null);
 
-    let isMounted = true;
     atendimentoApi
-      .getMessages(companyId, selectedConversation.id)
+      .getMessages(companyId, conv.id)
       .then((msgs) => {
-        if (isMounted) {
+        // Aplica apenas se a conversa ainda for a selecionada no momento do retorno
+        if (selectedConversationRef.current?.id === conv.id) {
           setMessages(msgs);
-          if (selectedConversation.unreadCount > 0) {
-            atendimentoApi.markAsRead(companyId, selectedConversation.id);
-          }
         }
       })
       .catch((err) => console.error('Erro ao buscar mensagens:', err));
 
-    return () => {
-      isMounted = false;
-    };
-  }, [companyId, selectedConversation?.id]);
+    if (conv.unreadCount > 0) {
+      atendimentoApi.markAsRead(companyId, conv.id).catch(() => {});
+    }
+  };
 
   // 4. Scroll to bottom of chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 5. Send Message / Internal Note
+  // 5. Enviar Mensagem no WhatsApp ou Nota Interna
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!selectedConversation || !inputText.trim() || sending) return;
+    const targetConv = selectedConversationRef.current || selectedConversation;
+    if (!targetConv || !inputText.trim() || sending) return;
 
     const text = inputText.trim();
     setSending(true);
+    setActionError(null);
+
+    // Mensagem otimista imediata na interface
+    const tempId = `temp_${Date.now()}`;
+    const optimisticMsg: WhatsAppMessage = {
+      id: tempId,
+      conversationId: targetConv.id,
+      companyId,
+      fromMe: true,
+      senderPhone: session?.phoneNumber || 'Restaurante',
+      senderName: activeUser?.name || 'Restaurante',
+      text,
+      type: 'TEXT',
+      timestamp: new Date().toISOString(),
+      status: 'SENT',
+      isInternalNote: isInternalNoteMode,
+      authorId: activeUser?.id,
+      authorName: activeUser?.name,
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setInputText('');
 
     try {
       if (isInternalNoteMode) {
-        // Send Internal Note
         await atendimentoApi.addNote(
           companyId,
-          selectedConversation.id,
+          targetConv.id,
           text,
           activeUser?.name || 'Dono',
           activeUser?.id || 'dono'
         );
-        setInputText('');
         setIsInternalNoteMode(false);
       } else {
-        // Send WhatsApp Message
         await atendimentoApi.sendMessage(
           companyId,
-          selectedConversation.id,
+          targetConv.id,
           text,
           activeUser?.name || 'Dono',
           activeUser?.id || 'dono'
         );
-        setInputText('');
       }
 
-      // Reload messages
-      const updatedMsgs = await atendimentoApi.getMessages(companyId, selectedConversation.id);
-      setMessages(updatedMsgs);
+      // Atualiza mensagens confirmadas do servidor
+      const updatedMsgs = await atendimentoApi.getMessages(companyId, targetConv.id);
+      if (selectedConversationRef.current?.id === targetConv.id) {
+        setMessages(updatedMsgs);
+      }
       reloadData();
     } catch (err: any) {
+      // Reverte mensagem otimista e restaura texto no campo
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setInputText(text);
       setActionError('Não foi possível enviar a mensagem: ' + (err?.message || String(err)));
     } finally {
       setSending(false);
@@ -576,7 +603,7 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
                 return (
                   <div
                     key={conv.id}
-                    onClick={() => setSelectedConversation(conv)}
+                    onClick={() => handleSelectConversation(conv)}
                     className={`p-3 cursor-pointer transition-colors flex items-start gap-3 select-none ${
                       isSelected
                         ? 'bg-orange-50/60 border-l-4 border-orange-500'
@@ -879,6 +906,23 @@ export const AtendimentoTab: React.FC<AtendimentoTabProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* Inline Action Error Banner */}
+                {actionError && (
+                  <div className="mb-2 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{actionError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActionError(null)}
+                      className="text-rose-500 hover:text-rose-800 p-0.5 rounded cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
                 {/* Input Area */}
                 <form onSubmit={handleSendMessage} className="flex items-end gap-2">
