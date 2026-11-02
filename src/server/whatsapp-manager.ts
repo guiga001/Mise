@@ -60,6 +60,7 @@ export class WhatsAppManager {
   private sessions: Map<string, CompanySessionState> = new Map();
   private listeners: Map<string, Set<(event: WhatsAppEventPayload) => void>> = new Map();
   private cachedVersion: [number, number, number] | null = null;
+  private connectingPromises: Map<string, Promise<WhatsAppSessionInfo>> = new Map();
 
   constructor() {
     ensureSessionsDir();
