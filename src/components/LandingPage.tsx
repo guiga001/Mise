@@ -1,9 +1,9 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * Mise — Landing Page Inicial
- * Apresentação institucional, cálculo interativo de ROI/CMV,
- * demonstração dos 9 pilares determinísticos e botões claros de Login e Cadastro.
+ * Mise — Página Inicial (Design Branco Minimalista com Acentos Preto & Laranja)
+ * Animações de fundo ultraleves em GPU, alta fidelidade visual,
+ * calculadora de economia em tempo real e autenticação estrita com senha única.
  */
 
 import React, { useState } from 'react';
@@ -16,23 +16,20 @@ import {
   ShieldCheck,
   Calculator,
   ArrowRight,
-  Sparkles,
-  BarChart3,
   Boxes,
   FileSpreadsheet,
   Coins,
   CheckCircle2,
   Clock,
   Layers,
-  Search,
   Scale,
   CalendarCheck,
-  ArrowUpRight,
-  Store,
   Lock,
   ChevronDown,
   ChevronUp,
-  PlayCircle,
+  Sparkles,
+  Zap,
+  ArrowUpRight,
 } from 'lucide-react';
 import { MiseDatabaseState } from '../lib/storage';
 import { AuthModal, AuthMode } from './AuthModal';
@@ -40,7 +37,6 @@ import { AuthModal, AuthMode } from './AuthModal';
 interface LandingPageProps {
   database: MiseDatabaseState;
   onLoginSuccess: (newState: MiseDatabaseState, activeUserId: string) => void;
-  onQuickDemo?: () => void;
   onBackToDashboard?: () => void;
 }
 
@@ -49,51 +45,71 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onLoginSuccess,
   onBackToDashboard,
 }) => {
-  // Auth Modal State
+  // Modal de Autenticação Segura
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
 
-  // ROI / CMV Calculator state
-  const [monthlyRevenue, setMonthlyRevenue] = useState<number>(85000);
+  // Estado da Calculadora de Retenção de CMV & Lucro
+  const [monthlyRevenue, setMonthlyRevenue] = useState<number>(95000);
   const [currentCmvPercent, setCurrentCmvPercent] = useState<number>(37);
   const [targetCmvPercent, setTargetCmvPercent] = useState<number>(31.5);
 
-  // Active showcase tab
-  const [showcaseTab, setShowcaseTab] = useState<'simulador' | 'estoque' | 'valor' | 'caixa'>('simulador');
+  // Tab ativa da demonstração técnica dos módulos
+  const [showcaseTab, setShowcaseTab] = useState<'simulador' | 'fefo' | 'nfe' | 'caixa'>('simulador');
 
-  // FAQ accordion state
+  // FAQ Accordion
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
-  // Derived ROI calculations
+  // Cálculos reativos da calculadora de lucro
   const cmvReductionPercent = Math.max(0, currentCmvPercent - targetCmvPercent);
   const monthlySavings = (monthlyRevenue * cmvReductionPercent) / 100;
   const annualSavings = monthlySavings * 12;
-  const estimatedHoursSaved = 24; // automação de compras + NF-e + fechamento
 
   const openAuth = (mode: AuthMode) => {
     setAuthMode(mode);
     setAuthModalOpen(true);
   };
 
-  const registeredUser = database.users && database.users.length > 0 ? database.users[0] : null;
-
   return (
-    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans selection:bg-amber-200">
-      {/* Top Banner if already authenticated */}
+    <div className="min-h-screen bg-white text-neutral-900 font-sans selection:bg-orange-500 selection:text-white relative overflow-hidden">
+      {/* =========================================================================
+          BACKGROUND ANIMADO ULTRALEVE (100% GPU / Zero impacto de performance)
+         ========================================================================= */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden="true">
+        {/* Subtle geometric dot grid pattern */}
+        <div className="absolute inset-0 bg-dot-grid opacity-60" />
+
+        {/* Floating ambient glow in soft orange (Top Right) */}
+        <div
+          className="absolute -top-40 -right-40 w-[600px] h-[600px] rounded-full bg-orange-400/12 blur-[100px] animate-float-slow"
+        />
+
+        {/* Floating ambient glow in soft neutral/charcoal (Bottom Left) */}
+        <div
+          className="absolute top-[40%] -left-32 w-[520px] h-[520px] rounded-full bg-neutral-900/5 blur-[90px] animate-float-reverse"
+        />
+
+        {/* Warm center highlight on hero */}
+        <div
+          className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[700px] h-[350px] rounded-full bg-orange-500/6 blur-[120px] animate-glow-pulse"
+        />
+      </div>
+
+      {/* Banner se já houver sessão ativa do usuário */}
       {onBackToDashboard && database.activeUserId && (
-        <div className="bg-stone-900 text-stone-200 text-xs py-2 px-4 flex items-center justify-between border-b border-stone-800">
-          <span className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+        <div className="relative z-40 bg-neutral-950 text-neutral-200 text-xs py-2 px-4 flex items-center justify-between border-b border-neutral-800">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
             <span>
               Sessão ativa de{' '}
-              <strong>
-                {database.users.find((u) => u.id === database.activeUserId)?.name || 'Dono'}
+              <strong className="text-white font-semibold">
+                {database.users.find((u) => u.id === database.activeUserId)?.name || 'Gestor'}
               </strong>
             </span>
-          </span>
+          </div>
           <button
             onClick={onBackToDashboard}
-            className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 cursor-pointer text-xs"
+            className="text-orange-400 hover:text-orange-300 font-bold flex items-center gap-1 cursor-pointer transition-colors"
           >
             <span>Voltar ao Painel Operacional</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -102,306 +118,383 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       )}
 
       {/* =========================================================================
-          1. TOP NAVIGATION HEADER
+          TOP BAR CONTRACT (3 Zonas Estritas: Marca — Links — Ação Primária)
          ========================================================================= */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-stone-200/80 transition-all">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Logo & Brand */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-stone-900 text-amber-400 flex items-center justify-center shadow-xs">
-              <ChefHat className="w-6 h-6 stroke-[2]" />
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-neutral-200/80 transition-all">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
+          {/* Zona 1: Marca (Elemento único, tipografia forte e acento em laranja) */}
+          <a href="#" className="flex items-center gap-2.5 shrink-0 group">
+            <div className="w-9 h-9 rounded-xl bg-neutral-950 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+              <ChefHat className="w-5 h-5 text-orange-500 stroke-[2.2]" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-lg tracking-tight text-stone-900">
-                  Mise
-                </span>
-                <span className="text-[10px] uppercase font-mono font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
-                  Gestão Alimentícia
-                </span>
-              </div>
-              <p className="text-[11px] text-stone-500 hidden sm:block">
-                Controle de CMV & Engenharia Operacional
-              </p>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-black tracking-tight text-neutral-950 font-sans">
+                Mise
+              </span>
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mb-1" />
             </div>
-          </div>
+          </a>
 
-          {/* Center Links (Desktop) */}
-          <nav className="hidden md:flex items-center gap-6 text-xs font-semibold text-stone-600">
-            <a href="#recursos" className="hover:text-stone-950 transition-colors">
-              Módulos Operacionais
+          {/* Zona 2: 4 Links de navegação concisos em linha única */}
+          <nav className="hidden md:flex items-center gap-7 text-xs font-semibold text-neutral-600">
+            <a href="#engenharia" className="hover:text-neutral-950 transition-colors whitespace-nowrap shrink-0">
+              Engenharia de CMV
             </a>
-            <a href="#calculadora" className="hover:text-stone-950 transition-colors">
-              Calculadora de Economia
+            <a href="#calculadora" className="hover:text-neutral-950 transition-colors whitespace-nowrap shrink-0">
+              Calculadora de Lucro
             </a>
-            <a href="#demonstracao" className="hover:text-stone-950 transition-colors">
-              Visão do Sistema
+            <a href="#modulos" className="hover:text-neutral-950 transition-colors whitespace-nowrap shrink-0">
+              Módulos do Sistema
             </a>
-            <a href="#matematica" className="hover:text-stone-950 transition-colors">
-              Por Que Determinístico
-            </a>
-            <a href="#depoimentos" className="hover:text-stone-950 transition-colors">
-              Resultados
+            <a href="#seguranca" className="hover:text-neutral-950 transition-colors whitespace-nowrap shrink-0">
+              Privacidade & Senha
             </a>
           </nav>
 
-          {/* Right Action Buttons: ENTRAR & CADASTRAR-SE */}
-          <div className="flex items-center gap-2 sm:gap-3">
-
-            {/* BOTÃO ENTRAR / LOGIN */}
+          {/* Zona 3: Ações de Autenticação com Senha Única */}
+          <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={() => openAuth('login')}
-              className="flex items-center gap-1.5 text-xs font-bold text-stone-800 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-2xs"
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-neutral-800 hover:text-neutral-950 hover:bg-neutral-100 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <LogIn className="w-3.5 h-3.5 text-stone-700" />
+              <LogIn className="w-3.5 h-3.5 text-neutral-600" />
               <span>Entrar</span>
             </button>
 
-            {/* BOTÃO CADASTRAR-SE / CRIAR CONTA */}
             <button
               type="button"
               onClick={() => openAuth('register')}
-              className="flex items-center gap-1.5 text-xs font-bold text-stone-950 bg-amber-400 hover:bg-amber-300 border border-amber-500/30 px-4 py-2 rounded-xl transition-all cursor-pointer shadow-xs hover:shadow-sm"
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-neutral-950 hover:bg-neutral-900 border border-neutral-900 hover:border-orange-500 rounded-xl transition-all cursor-pointer shadow-sm hover:shadow-orange-500/10 whitespace-nowrap shrink-0"
             >
-              <UserPlus className="w-3.5 h-3.5 text-stone-950" />
-              <span>Cadastrar-se</span>
+              <UserPlus className="w-3.5 h-3.5 text-orange-400" />
+              <span>Cadastrar Empresa</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* =========================================================================
-          2. HERO SECTION
+          HERO SECTION (Alto Impacto, Branco Minimalista, Tipografia Forte)
          ========================================================================= */}
-      <section className="relative pt-12 pb-20 md:pt-20 md:pb-28 overflow-hidden bg-gradient-to-b from-stone-100/80 via-white to-stone-50 border-b border-stone-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <section className="relative z-10 pt-14 pb-20 md:pt-22 md:pb-28">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto">
-            {/* Top Pill / Badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-stone-900 text-stone-100 text-xs font-medium shadow-xs mb-6">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span>Matemática Pura em Centavos (BigInt) · Zero Heurísticas Alucinadas</span>
+            {/* Kicker Tipográfico Limpo (Zero Pills) */}
+            <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-neutral-500 mb-5">
+              <span className="text-orange-600">Mise Gastronomia</span>
+              <span aria-hidden="true">·</span>
+              <span>Engenharia de Margem</span>
+              <span aria-hidden="true">·</span>
+              <span>Controle de Estoque FEFO</span>
             </div>
 
-            {/* Main Title */}
-            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-stone-950 tracking-tight leading-[1.1]">
-              O Sistema Operacional Financeiro do{' '}
-              <span className="bg-gradient-to-r from-amber-600 to-amber-800 bg-clip-text text-transparent">
-                Comércio Alimentício
+            {/* Headline Monumental com Equilíbrio de Quebra */}
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-neutral-950 tracking-tight leading-[1.08] text-balance">
+              Onde cada centavo da sua cozinha se transforma em{' '}
+              <span className="relative whitespace-nowrap">
+                <span className="relative z-10 text-orange-600">lucro líquido</span>
+                <span className="absolute bottom-1 left-0 w-full h-3 bg-orange-100/80 -z-0 rounded-xs" />
               </span>
+              .
             </h1>
 
-            {/* Subtitle */}
-            <p className="mt-5 text-base sm:text-lg text-stone-600 leading-relaxed max-w-2xl mx-auto">
-              Pare de perder dinheiro para custos invisíveis e variações de estoque.
-              A <strong>Mise</strong> decompõe seu CMV em centavos inteiros, audita notas fiscais (NF-e)
-              sem redigitação, antecipa vencimentos FEFO e calcula sua margem real em cada prato e canal.
+            {/* Subtítulo Focado no Negócio Real */}
+            <p className="mt-6 text-base sm:text-lg text-neutral-600 leading-relaxed max-w-2xl mx-auto text-balance">
+              Chega de perdas invisíveis na despensa e margens comidas pelas taxas de delivery.
+              A <strong>Mise</strong> decompõe o seu CMV real centavo por centavo, automatiza pedidos de compra
+              sem redigitação de NF-e e previne quebras de estoque com matemática determinística.
             </p>
 
-            {/* CTA Buttons Group (Cadastro & Login em destaque) */}
-            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
+            {/* Grupo de Ação de Alto Contraste */}
+            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
               <button
                 type="button"
                 onClick={() => openAuth('register')}
-                className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-sm font-bold text-stone-950 bg-amber-400 hover:bg-amber-300 shadow-md hover:shadow-lg transition-all cursor-pointer group"
+                className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-7 py-3.5 rounded-xl text-sm font-bold text-white bg-neutral-950 hover:bg-neutral-900 border border-neutral-950 hover:border-orange-500 shadow-md hover:shadow-orange-500/20 transition-all cursor-pointer group"
               >
-                <span>Cadastrar Meu Estabelecimento</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                <span>Criar Minha Empresa Grátis</span>
+                <ArrowRight className="w-4 h-4 text-orange-400 group-hover:translate-x-1 transition-transform" />
               </button>
 
               <button
                 type="button"
-                onClick={() => openAuth('login')}
-                className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-sm font-bold text-white bg-stone-900 hover:bg-stone-800 shadow-md transition-all cursor-pointer"
+                onClick={() => {
+                  const calc = document.getElementById('calculadora');
+                  calc?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl text-sm font-bold text-neutral-800 hover:text-neutral-950 bg-neutral-100 hover:bg-neutral-200 border border-neutral-200 transition-all cursor-pointer"
               >
-                <LogIn className="w-4 h-4 text-amber-400" />
-                <span>Já Sou Cliente / Entrar</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openAuth('login')}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-xs font-semibold text-stone-700 hover:text-stone-950 bg-stone-200/70 hover:bg-stone-200 transition-colors cursor-pointer"
-              >
-                <PlayCircle className="w-4 h-4 text-stone-600" />
-                <span>Ver Demonstração Pronta</span>
+                <Calculator className="w-4 h-4 text-neutral-600" />
+                <span>Simular Retenção de Lucro</span>
               </button>
             </div>
 
-            {/* Assurance Trust Badges */}
-            <div className="mt-10 pt-8 border-t border-stone-200/80 grid grid-cols-2 sm:grid-cols-4 gap-4 text-left">
-              <div className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                <span className="text-xs text-stone-600">
-                  <strong>Centavos inteiros:</strong> zero imprecisão de float IEEE 754.
-                </span>
+            {/* Garantia de Segurança e Isolamento */}
+            <div className="mt-5 flex items-center justify-center gap-2 text-[11px] text-neutral-500">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Instalação privada por empresa · Senha única criptografada (SHA-256)</span>
+            </div>
+          </div>
+
+          {/* =========================================================================
+              HERO VISUAL SHOWCASE (Imagem de Gastronomia de Luxo + Métricas Vivas)
+             ========================================================================= */}
+          <div className="mt-14 relative max-w-5xl mx-auto">
+            {/* Moldura Minimalista com Borda Fina e Sombra de Estúdio */}
+            <div className="relative rounded-2xl bg-neutral-950 p-2 sm:p-3 shadow-2xl border border-neutral-200 overflow-hidden">
+              <div className="relative aspect-16/9 rounded-xl overflow-hidden bg-neutral-900">
+                <img
+                  src="/src/assets/images/hero_restaurant_craft_1793400062497.jpg"
+                  alt="Cozinha contemporânea de alta precisão operacional Mise"
+                  className="w-full h-full object-cover object-center filter brightness-95 contrast-105"
+                  referrerPolicy="no-referrer"
+                  loading="eager"
+                />
+
+                {/* Scrim Gradiente Fino para Leitura Segura */}
+                <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/85 via-neutral-950/20 to-transparent" />
+
+                {/* Live Overlays na Imagem: Métricas Reais de Cozinha */}
+                <div className="absolute bottom-4 left-4 right-4 sm:bottom-6 sm:left-6 sm:right-6 flex flex-wrap items-end justify-between gap-3 text-white">
+                  <div>
+                    <div className="text-[11px] font-mono text-orange-400 font-semibold tracking-wider uppercase">
+                      Passagem Operacional em Tempo Real
+                    </div>
+                    <div className="text-lg sm:text-2xl font-black text-white tracking-tight">
+                      Prato Principal: Polvo Grelhado com Mousseline
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-neutral-300 mt-1">
+                      <span>Custo Unitário: <strong>R$ 21,80</strong></span>
+                      <span aria-hidden="true">·</span>
+                      <span>Preço Sugerido: <strong>R$ 78,00</strong></span>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-emerald-400 font-bold">Margem: 72.1%</span>
+                    </div>
+                  </div>
+
+                  {/* Terminal Card Compacto */}
+                  <div className="bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 px-4 py-2.5 rounded-xl text-xs font-mono hidden sm:block">
+                    <div className="text-neutral-400 text-[10px]">CMV DIÁRIO CONSOLIDADO</div>
+                    <div className="text-base font-bold text-white flex items-center gap-2">
+                      <span className="text-emerald-400 tabular-nums">29.4%</span>
+                      <span className="text-[10px] text-neutral-400">(Meta: 31.0%)</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                <span className="text-xs text-stone-600">
-                  <strong>Fórmulas abertas:</strong> botão "Como calculamos" em cada tela.
-                </span>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                <span className="text-xs text-stone-600">
-                  <strong>Importador NF-e XML:</strong> cadastro automático de notas.
-                </span>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                <span className="text-xs text-stone-600">
-                  <strong>Fechamento mensal:</strong> trava de período e DRE pronta.
-                </span>
-              </div>
+            </div>
+
+            {/* Faixa Flutuante de Destaque Técnico */}
+            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-white border border-neutral-200/90 shadow-lg px-6 py-2.5 rounded-full hidden md:flex items-center gap-6 text-xs font-medium text-neutral-700">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-orange-500" />
+                <span>Cálculo puro em centavos inteiros (BigInt)</span>
+              </span>
+              <span className="w-px h-3.5 bg-neutral-200" />
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span>Zero erros de ponto flutuante</span>
+              </span>
+              <span className="w-px h-3.5 bg-neutral-200" />
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-neutral-900" />
+                <span>Totalmente determinístico</span>
+              </span>
             </div>
           </div>
         </div>
       </section>
 
       {/* =========================================================================
-          3. CALCULADORA INTERATIVA DE ECONOMIA & CMV (F01, F03, F48)
+          PROVA QUANTITATIVA & RIGOR DO SISTEMA (4 Indicadores Reais)
          ========================================================================= */}
-      <section id="calculadora" className="py-16 bg-white border-b border-stone-200">
+      <section className="py-16 bg-neutral-50/70 border-y border-neutral-200/80 relative z-10" id="engenharia">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-12">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-100 text-amber-900 text-xs font-bold mb-3">
-              <Calculator className="w-3.5 h-3.5" />
-              <span>Simulador de Retorno do Investimento</span>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
+            <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-2xs hover:border-neutral-300 transition-colors">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-950 font-mono tabular-nums tracking-tight">
+                -4.2%
+              </div>
+              <div className="text-xs font-bold text-orange-600 mt-1 uppercase tracking-wider">
+                Redução de CMV
+              </div>
+              <p className="text-xs text-neutral-500 mt-2 leading-relaxed">
+                Média atingida nas cozinhas ao eliminar porções sem ficha e ingredientes sem cotação.
+              </p>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-stone-950 tracking-tight">
-              Quanto dinheiro está escorrendo pelos dedos da sua cozinha?
+
+            <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-2xs hover:border-neutral-300 transition-colors">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-950 font-mono tabular-nums tracking-tight">
+                R$ 0,00
+              </div>
+              <div className="text-xs font-bold text-neutral-800 mt-1 uppercase tracking-wider">
+                Desvio de Arredondamento
+              </div>
+              <p className="text-xs text-neutral-500 mt-2 leading-relaxed">
+                Cada receita e nota fiscal é calculada em centavos inteiros, sem resíduos de float.
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-2xs hover:border-neutral-300 transition-colors">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-950 font-mono tabular-nums tracking-tight">
+                24h / mês
+              </div>
+              <div className="text-xs font-bold text-orange-600 mt-1 uppercase tracking-wider">
+                Tempo Economizado
+              </div>
+              <p className="text-xs text-neutral-500 mt-2 leading-relaxed">
+                Importação instantânea de arquivos XML de NF-e e geração de listas de compras automáticas.
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-2xs hover:border-neutral-300 transition-colors">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-950 font-mono tabular-nums tracking-tight">
+                100%
+              </div>
+              <div className="text-xs font-bold text-emerald-700 mt-1 uppercase tracking-wider">
+                Privacidade & Senha
+              </div>
+              <p className="text-xs text-neutral-500 mt-2 leading-relaxed">
+                Dados e fornecedores isolados por empresa com hash criptográfico SHA-256 e acesso único.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          CALCULADORA DE RETENÇÃO DE LUCRO & CMV (Interativa em Tempo Real)
+         ========================================================================= */}
+      <section className="py-20 bg-white relative z-10" id="calculadora">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="max-w-3xl mx-auto text-center mb-12">
+            <span className="text-xs font-bold uppercase tracking-widest text-orange-600">
+              Impacto Financeiro Direto
+            </span>
+            <h2 className="text-2xl sm:text-4xl font-black text-neutral-950 tracking-tight mt-2 text-balance">
+              Quanto dinheiro a sua cozinha está deixando na mesa todo mês?
             </h2>
-            <p className="mt-2 text-xs sm:text-sm text-stone-600">
-              Ajuste o faturamento mensal e veja o impacto financeiro real que uma redução de 3% a 6%
-              no CMV gera diretamente no caixa da sua empresa.
+            <p className="text-sm text-neutral-600 mt-3 text-balance">
+              Ajuste o seu faturamento mensal e a meta de redução de CMV para calcular o valor exato
+              que a Mise recupera diretamente para o fluxo de caixa do seu negócio.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center bg-stone-50 p-6 sm:p-10 rounded-3xl border border-stone-200 shadow-xs">
-            {/* Left Sliders / Controls */}
-            <div className="lg:col-span-7 space-y-6">
-              {/* Faturamento Mensal */}
-              <div>
-                <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-2">
-                  <span>Faturamento Mensal Bruto</span>
-                  <span className="text-sm font-mono text-stone-950 bg-white px-3 py-1 rounded-lg border border-stone-300 shadow-2xs">
-                    R$ {monthlyRevenue.toLocaleString('pt-BR')}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="20000"
-                  max="350000"
-                  step="5000"
-                  value={monthlyRevenue}
-                  onChange={(e) => setMonthlyRevenue(Number(e.target.value))}
-                  className="w-full accent-stone-900 cursor-pointer h-2 bg-stone-200 rounded-lg"
-                />
-                <div className="flex justify-between text-[10px] text-stone-400 mt-1">
-                  <span>R$ 20.000 (Café/Bistrô)</span>
-                  <span>R$ 150.000 (Restaurante/Pizzaria)</span>
-                  <span>R$ 350.000+ (Multi-operações)</span>
-                </div>
-              </div>
-
-              {/* CMV Atual */}
-              <div>
-                <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-2">
-                  <span>CMV Atual Estimado (Custo de Mercadoria Vendida)</span>
-                  <span className="text-sm font-mono text-rose-700 bg-rose-50 px-3 py-1 rounded-lg border border-rose-200">
-                    {currentCmvPercent}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="28"
-                  max="46"
-                  step="0.5"
-                  value={currentCmvPercent}
-                  onChange={(e) => setCurrentCmvPercent(Number(e.target.value))}
-                  className="w-full accent-rose-600 cursor-pointer h-2 bg-stone-200 rounded-lg"
-                />
-                <span className="text-[11px] text-stone-500 block mt-1">
-                  Média no Brasil sem padronização: 35% a 42%.
-                </span>
-              </div>
-
-              {/* Meta de CMV com Mise */}
-              <div>
-                <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-2">
-                  <span>Meta de CMV com Mise (Padronização + FEFO + Compras)</span>
-                  <span className="text-sm font-mono text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
-                    {targetCmvPercent}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="22"
-                  max="35"
-                  step="0.5"
-                  value={targetCmvPercent}
-                  onChange={(e) => setTargetCmvPercent(Number(e.target.value))}
-                  className="w-full accent-emerald-600 cursor-pointer h-2 bg-stone-200 rounded-lg"
-                />
-                <span className="text-[11px] text-emerald-600 block mt-1 font-medium">
-                  Ganho de margem recuperado: -{cmvReductionPercent.toFixed(1)}% de despesas com insumos.
-                </span>
-              </div>
-            </div>
-
-            {/* Right Result Highlight Card */}
-            <div className="lg:col-span-5 bg-stone-900 text-white p-6 sm:p-8 rounded-2xl border border-stone-800 shadow-xl flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-amber-400 text-xs font-bold tracking-wide uppercase">
-                  <Coins className="w-4 h-4" />
-                  <span>Dinheiro Recuperado para o Caixa</span>
-                </div>
-
-                <div className="mt-4">
-                  <div className="text-xs text-stone-400">Economia Mensal Estimada</div>
-                  <div className="text-3xl sm:text-4xl font-extrabold text-amber-400 font-mono tracking-tight mt-1">
-                    R$ {Math.round(monthlySavings).toLocaleString('pt-BR')}
-                    <span className="text-xs text-stone-400 font-sans font-normal ml-1">/mês</span>
+          <div className="max-w-4xl mx-auto bg-neutral-50 rounded-3xl border border-neutral-200 p-6 sm:p-10 shadow-xs">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              {/* Controles de Slider */}
+              <div className="lg:col-span-7 space-y-6">
+                {/* Slider 1: Faturamento Mensal */}
+                <div>
+                  <div className="flex items-center justify-between text-xs font-bold text-neutral-800 mb-2">
+                    <span>Faturamento Mensal da Empresa</span>
+                    <span className="font-mono text-neutral-950 text-sm">
+                      R$ {monthlyRevenue.toLocaleString('pt-BR')}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={30000}
+                    max={500000}
+                    step={5000}
+                    value={monthlyRevenue}
+                    onChange={(e) => setMonthlyRevenue(Number(e.target.value))}
+                    className="w-full h-2 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-neutral-950 focus:outline-none"
+                  />
+                  <div className="flex justify-between text-[10px] text-neutral-400 mt-1 font-mono">
+                    <span>R$ 30.000</span>
+                    <span>R$ 250.000</span>
+                    <span>R$ 500.000</span>
                   </div>
                 </div>
 
-                <div className="mt-6 pt-5 border-t border-stone-800 grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-[11px] text-stone-400">No Acumulado do Ano</div>
-                    <div className="text-base font-bold text-white font-mono mt-0.5">
-                      R$ {Math.round(annualSavings).toLocaleString('pt-BR')}
+                {/* Slider 2: CMV Atual */}
+                <div>
+                  <div className="flex items-center justify-between text-xs font-bold text-neutral-800 mb-2">
+                    <span>CMV Atual Estimado (Custo de Mercadoria)</span>
+                    <span className="font-mono text-neutral-950 text-sm">
+                      {currentCmvPercent}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={25}
+                    max={50}
+                    step={0.5}
+                    value={currentCmvPercent}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setCurrentCmvPercent(val);
+                      if (val <= targetCmvPercent) {
+                        setTargetCmvPercent(val - 2);
+                      }
+                    }}
+                    className="w-full h-2 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-orange-600 focus:outline-none"
+                  />
+                  <div className="flex justify-between text-[10px] text-neutral-400 mt-1 font-mono">
+                    <span>25% (Excelente)</span>
+                    <span>35% (Médio)</span>
+                    <span>50% (Crítico)</span>
+                  </div>
+                </div>
+
+                {/* Slider 3: Meta de CMV */}
+                <div>
+                  <div className="flex items-center justify-between text-xs font-bold text-neutral-800 mb-2">
+                    <span>Meta de CMV Otimizado com Mise</span>
+                    <span className="font-mono text-emerald-700 text-sm font-bold">
+                      {targetCmvPercent}% ({cmvReductionPercent.toFixed(1)}% de ganho)
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={20}
+                    max={Math.max(21, currentCmvPercent - 0.5)}
+                    step={0.5}
+                    value={targetCmvPercent}
+                    onChange={(e) => setTargetCmvPercent(Number(e.target.value))}
+                    className="w-full h-2 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 focus:outline-none"
+                  />
+                  <div className="flex justify-between text-[10px] text-neutral-400 mt-1 font-mono">
+                    <span>20%</span>
+                    <span>Meta Realista</span>
+                    <span>{currentCmvPercent - 0.5}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Placar de Economia Projetada */}
+              <div className="lg:col-span-5 bg-neutral-950 text-white rounded-2xl p-6 sm:p-7 border border-neutral-900 shadow-md flex flex-col justify-between">
+                <div>
+                  <div className="text-[11px] uppercase font-mono font-bold tracking-wider text-orange-400">
+                    Lucro Adicional Recuperado
+                  </div>
+
+                  {/* Valor Mensal */}
+                  <div className="mt-4">
+                    <div className="text-xs text-neutral-400">Economia no caixa todo mês:</div>
+                    <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight mt-1 tabular-nums">
+                      R$ {monthlySavings.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-[11px] text-stone-400">Tempo Poupado</div>
-                    <div className="text-base font-bold text-emerald-400 font-mono mt-0.5">
-                      ~{estimatedHoursSaved}h / mês
+
+                  {/* Valor Anual */}
+                  <div className="mt-4 pt-4 border-t border-neutral-800">
+                    <div className="text-xs text-neutral-400">Em 12 meses acumulados:</div>
+                    <div className="text-xl sm:text-2xl font-bold text-emerald-400 font-mono tracking-tight mt-0.5 tabular-nums">
+                      R$ {annualSavings.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
 
-                <p className="mt-4 text-[11px] text-stone-400 leading-relaxed">
-                  Cálculo determinístico baseado na fórmula de decomposição de CMV (F33) e variância de uso (F13).
-                  Sem heurísticas ou promessas mágicas.
-                </p>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-stone-800 space-y-2">
                 <button
                   type="button"
                   onClick={() => openAuth('register')}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold text-stone-950 bg-amber-400 hover:bg-amber-300 transition-colors shadow-xs cursor-pointer"
+                  className="mt-6 w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold text-neutral-950 bg-orange-500 hover:bg-orange-400 transition-colors shadow-sm cursor-pointer"
                 >
-                  <span>Recuperar essa Margem → Cadastrar</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openAuth('login')}
-                  className="w-full text-center text-[11px] text-stone-400 hover:text-white transition-colors cursor-pointer py-1"
-                >
-                  Já é cadastrado? Clique para Entrar
+                  <span>Recuperar Este Lucro na Minha Cozinha</span>
+                  <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -410,228 +503,293 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </section>
 
       {/* =========================================================================
-          4. INTERACTIVE PRODUCT SHOWCASE / DEMONSTRAÇÃO
+          BENTO GRID DE ARQUITETURA OPERACIONAL (4 Pilares Essenciais)
          ========================================================================= */}
-      <section id="demonstracao" className="py-16 bg-stone-100/70 border-b border-stone-200">
+      <section className="py-20 bg-neutral-50/50 border-t border-neutral-200/80 relative z-10" id="modulos">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-100/70 px-3 py-1 rounded-md">
-              Visão do Sistema
+          <div className="max-w-3xl mb-12">
+            <span className="text-xs font-bold uppercase tracking-widest text-neutral-500">
+              Arquitetura Determinística
             </span>
-            <h2 className="mt-3 text-2xl sm:text-3xl font-extrabold text-stone-950 tracking-tight">
-              Projetado para o ritmo real de uma cozinha comercial
+            <h2 className="text-2xl sm:text-4xl font-black text-neutral-950 tracking-tight mt-2 text-balance">
+              Quatro pilares matemáticos que blindam a rentabilidade do seu negócio.
             </h2>
-            <p className="mt-2 text-xs sm:text-sm text-stone-600">
-              Conheça os módulos determinísticos construídos para donos de restaurantes, hamburguerias, confeitarias e bares.
-            </p>
           </div>
 
-          {/* Tab Selector for Showcase */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+            {/* Bento Card 1: Ficha Técnica & Explosão Recursiva (Span 7) */}
+            <div className="md:col-span-7 bg-white rounded-3xl border border-neutral-200 overflow-hidden shadow-2xs flex flex-col justify-between">
+              <div className="p-7">
+                <div className="w-10 h-10 rounded-xl bg-neutral-950 text-orange-500 flex items-center justify-center mb-5">
+                  <Layers className="w-5 h-5 stroke-[2]" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold text-neutral-950 tracking-tight">
+                  01. Ficha Técnica Viva com Proteção contra Ciclos
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-600 mt-2 leading-relaxed">
+                  Sub-receitas aninhadas (molhos, caldos e bases) são explodidas recursivamente.
+                  Cada grama incorpora o Fator de Correção (perdas limpas) e Fator de Cocção (rendimento térmico).
+                  Se o preço da manteiga ou do óleo subir na nota fiscal, o custo da porção se atualiza na hora.
+                </p>
+              </div>
+              <div className="p-4 sm:p-6 bg-neutral-100/60 border-t border-neutral-100">
+                <div className="relative aspect-16/9 rounded-xl overflow-hidden border border-neutral-200 bg-white">
+                  <img
+                    src="/src/assets/images/bento_kitchen_intelligence_1793400063016.jpg"
+                    alt="Mise en place de precisão matemática e insumos controlados"
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-neutral-950/20" />
+                  <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-xs px-3 py-1.5 rounded-lg border border-neutral-200 text-[11px] font-mono font-bold text-neutral-900">
+                    Fórmula F01 · Custo Médio Ponderado em Centavos
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bento Card 2: Estoque FEFO & Vencimentos (Span 5) */}
+            <div className="md:col-span-5 bg-white rounded-3xl border border-neutral-200 p-7 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="w-10 h-10 rounded-xl bg-neutral-950 text-orange-500 flex items-center justify-center mb-5">
+                  <Clock className="w-5 h-5 stroke-[2]" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold text-neutral-950 tracking-tight">
+                  02. Estoque FEFO & Risco de Vencimento
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-600 mt-2 leading-relaxed">
+                  Primeiro que Vence, Primeiro que Sai (*First Expire, First Out*).
+                  O sistema cruza o saldo dos lotes com o consumo diário médio e avisa com dias de antecedência
+                  o risco de perda financeira em reais.
+                </p>
+              </div>
+
+              <div className="mt-6 bg-neutral-50 rounded-2xl p-4 border border-neutral-200 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between text-neutral-700">
+                  <span>Queijo Brie (Lote #4102)</span>
+                  <span className="text-orange-600 font-bold">Vence em 4 dias</span>
+                </div>
+                <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-orange-500 w-[85%]" />
+                </div>
+                <div className="text-[10px] text-neutral-500 flex justify-between">
+                  <span>Consumo previsto: 4.2 kg</span>
+                  <span>Excedente em risco: R$ 0,00</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bento Card 3: Parser de NF-e sem Redigitação (Span 6) */}
+            <div className="md:col-span-6 bg-white rounded-3xl border border-neutral-200 p-7 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="w-10 h-10 rounded-xl bg-neutral-950 text-orange-500 flex items-center justify-center mb-5">
+                  <FileSpreadsheet className="w-5 h-5 stroke-[2]" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold text-neutral-950 tracking-tight">
+                  03. Auditoria e Parser de NF-e em 3 Segundos
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-600 mt-2 leading-relaxed">
+                  Importe o XML da Nota Fiscal Eletrônica diretamente. O motor de similaridade determinístico
+                  associa o nome do fornecedor ao seu insumo cadastrado, recalcula o Custo Médio Ponderado
+                  e lança o contas a pagar automaticamente.
+                </p>
+              </div>
+
+              <div className="mt-6 flex items-center gap-2 text-xs font-semibold text-neutral-700 bg-neutral-50 p-3 rounded-xl border border-neutral-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Conversão automática de caixas e fardos para gramas ou mililitros.</span>
+              </div>
+            </div>
+
+            {/* Bento Card 4: Retirada Segura & Caixa Projetado (Span 6) */}
+            <div className="md:col-span-6 bg-white rounded-3xl border border-neutral-200 p-7 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="w-10 h-10 rounded-xl bg-neutral-950 text-orange-500 flex items-center justify-center mb-5">
+                  <Coins className="w-5 h-5 stroke-[2]" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold text-neutral-950 tracking-tight">
+                  04. Retirada Segura do Dono & Fluxo de Caixa
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-600 mt-2 leading-relaxed">
+                  Nunca mais fique em dúvida se pode retirar pró-labore este mês.
+                  A Mise desconta as provisões trabalhistas, impostos do Simples Nacional
+                  e colchão operacional dos próximos 30 dias para dizer o valor exato seguro.
+                </p>
+              </div>
+
+              <div className="mt-6 flex items-center justify-between p-3.5 bg-neutral-950 text-white rounded-xl text-xs font-mono">
+                <span className="text-neutral-400">VALOR LIBERADO PARA RETIRADA:</span>
+                <span className="text-emerald-400 font-bold text-sm">R$ 14.850,00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          DEMONSTRAÇÃO INTERATIVA DOS MÓDULOS OPERACIONAIS (Tabs Funcionais)
+         ========================================================================= */}
+      <section className="py-20 bg-white relative z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="max-w-3xl mx-auto text-center mb-10">
+            <span className="text-xs font-bold uppercase tracking-widest text-orange-600">
+              Terminal Operacional
+            </span>
+            <h2 className="text-2xl sm:text-4xl font-black text-neutral-950 tracking-tight mt-2 text-balance">
+              Simule a experiência de controle que você terá no dia a dia.
+            </h2>
+          </div>
+
+          {/* Segmented Controls / Tab Buttons */}
+          <div className="flex flex-wrap items-center justify-center gap-2 max-w-2xl mx-auto p-1.5 bg-neutral-100 rounded-2xl border border-neutral-200 mb-8">
             <button
+              type="button"
               onClick={() => setShowcaseTab('simulador')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 showcaseTab === 'simulador'
-                  ? 'bg-stone-900 text-white shadow-xs'
-                  : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-950'
               }`}
             >
-              1. Simulador "E se?" (F01)
+              Simulador "E se?"
             </button>
             <button
-              onClick={() => setShowcaseTab('estoque')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                showcaseTab === 'estoque'
-                  ? 'bg-stone-900 text-white shadow-xs'
-                  : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
+              type="button"
+              onClick={() => setShowcaseTab('fefo')}
+              className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                showcaseTab === 'fefo'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-950'
               }`}
             >
-              2. Estoque FEFO & Vencimentos (F14)
+              Estoque FEFO
             </button>
             <button
-              onClick={() => setShowcaseTab('valor')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                showcaseTab === 'valor'
-                  ? 'bg-stone-900 text-white shadow-xs'
-                  : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
+              type="button"
+              onClick={() => setShowcaseTab('nfe')}
+              className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                showcaseTab === 'nfe'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-950'
               }`}
             >
-              3. Central de Valor Realizada (F48)
+              Parser de NF-e
             </button>
             <button
+              type="button"
               onClick={() => setShowcaseTab('caixa')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 showcaseTab === 'caixa'
-                  ? 'bg-stone-900 text-white shadow-xs'
-                  : 'bg-white text-stone-600 hover:text-stone-900 border border-stone-200'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-950'
               }`}
             >
-              4. Ponto de Equilíbrio & Caixa (F28)
+              Caixa & DRE
             </button>
           </div>
 
-          {/* Showcase Display Card */}
-          <div className="bg-white rounded-3xl border border-stone-200/90 p-6 sm:p-8 shadow-sm max-w-4xl mx-auto">
+          {/* Tab View Container */}
+          <div className="max-w-4xl mx-auto bg-neutral-950 text-white rounded-3xl p-6 sm:p-8 border border-neutral-800 shadow-xl font-mono text-xs">
             {showcaseTab === 'simulador' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between pb-4 border-b border-stone-100">
-                  <div>
-                    <span className="text-[10px] font-mono font-bold uppercase text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                      Fórmula F01 · docs/formulas/F01-simulador-insumo.md
-                    </span>
-                    <h3 className="text-base font-bold text-stone-900 mt-1">
-                      Simulação: "E se o Blend Bovino Angus subir +12%?"
-                    </h3>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-rose-600 bg-rose-50 px-3 py-1 rounded-lg border border-rose-200">
-                    Impacto: -R$ 1.840,00 / mês
+                <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                  <span className="text-orange-400 font-bold uppercase tracking-wider text-[11px]">
+                    F01 · SIMULADOR DETERMINÍSTICO DE INSUMO
                   </span>
+                  <span className="text-neutral-400 text-[10px]">Cálculo puro centavo a centavo</span>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-500 block text-[11px]">Custo Atual / kg</span>
-                    <span className="font-mono font-bold text-stone-900 text-sm">R$ 48,00</span>
-                  </div>
-                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-500 block text-[11px]">Novo Custo Simulado</span>
-                    <span className="font-mono font-bold text-rose-700 text-sm">R$ 53,76 (+12%)</span>
-                  </div>
-                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
-                    <span className="text-amber-900 block text-[11px]">Ação Recomendada (F03)</span>
-                    <span className="font-bold text-amber-950 text-xs">Reajuste de +R$ 1,20 no Smash</span>
-                  </div>
-                </div>
-
-                <p className="text-xs text-stone-600 leading-relaxed pt-2">
-                  A Mise recalcula todas as receitas e sub-receitas que usam o insumo, cruza com o histórico real
-                  de vendas e informa na hora a queda de volume tolerável antes de você mexer no preço.
+                <p className="text-neutral-300 font-sans text-xs leading-relaxed">
+                  "E se o quilo do filé mignon subir 15%?" — O motor percorre todas as 12 receitas e sub-receitas
+                  que utilizam carne, calcula o impacto ponderado no CMV e diz quanto você precisa reajustar no preço final
+                  ou qual queda de volume pode tolerar sem perder margem.
                 </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                  <div className="bg-neutral-900 p-3.5 rounded-xl border border-neutral-800">
+                    <div className="text-neutral-400 text-[10px]">Impacto no Custo Médio</div>
+                    <div className="text-base font-bold text-rose-400 mt-1">+ R$ 1,42 / prato</div>
+                  </div>
+                  <div className="bg-neutral-900 p-3.5 rounded-xl border border-neutral-800">
+                    <div className="text-neutral-400 text-[10px]">Reajuste Sugerido</div>
+                    <div className="text-base font-bold text-orange-400 mt-1">R$ 54,00 → R$ 56,20</div>
+                  </div>
+                  <div className="bg-neutral-900 p-3.5 rounded-xl border border-neutral-800">
+                    <div className="text-neutral-400 text-[10px]">Queda Tolerável de Volume</div>
+                    <div className="text-base font-bold text-emerald-400 mt-1">- 4.8% das vendas</div>
+                  </div>
+                </div>
               </div>
             )}
 
-            {showcaseTab === 'estoque' && (
+            {showcaseTab === 'fefo' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between pb-4 border-b border-stone-100">
+                <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                  <span className="text-orange-400 font-bold uppercase tracking-wider text-[11px]">
+                    F14 · CONTROLE POR LOTE & VENCIMENTO FEFO
+                  </span>
+                  <span className="text-neutral-400 text-[10px]">Auditoria contínua</span>
+                </div>
+                <p className="text-neutral-300 font-sans text-xs leading-relaxed">
+                  Identifica excedentes antes do vencimento. O algoritmo cruza o estoque atual do lote com o consumo médio diário dos últimos 30 dias.
+                </p>
+                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800 flex items-center justify-between">
                   <div>
-                    <span className="text-[10px] font-mono font-bold uppercase text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                      Fórmula F14 · docs/formulas/F14-risco-vencimento-fefo.md
-                    </span>
-                    <h3 className="text-base font-bold text-stone-900 mt-1">
-                      Monitor de Risco de Vencimento FEFO (Primeiro a Vencer, Primeiro a Sair)
-                    </h3>
+                    <div className="text-white font-bold">Lote Queijo Gouda Fracionado #882</div>
+                    <div className="text-neutral-400 text-[11px] mt-0.5">Saldo: 8,4 kg · Validade: 04/11/2026</div>
                   </div>
-                  <span className="text-xs font-mono font-bold text-amber-800 bg-amber-50 px-3 py-1 rounded-lg border border-amber-200">
-                    R$ 850,00 sob risco de perda
+                  <span className="px-3 py-1 rounded bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold">
+                    Promoção / Sugestão de Sugerida
                   </span>
                 </div>
-
-                <div className="space-y-2 text-xs">
-                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-rose-950 block">Queijo Cheddar Inglês (Lote A-09)</span>
-                      <span className="text-[11px] text-rose-700">Validade: 8 dias restantes · Saldo: 3,5 kg</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="font-mono font-bold text-rose-900 block">R$ 227,50</span>
-                      <span className="text-[10px] uppercase font-bold text-rose-600">Alerta Crítico</span>
-                    </div>
-                  </div>
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-amber-950 block">Pão Brioche Selado (Lote P-34)</span>
-                      <span className="text-[11px] text-amber-700">Validade: 4 dias restantes · Saldo: 140 un</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="font-mono font-bold text-amber-900 block">R$ 252,00</span>
-                      <span className="text-[10px] uppercase font-bold text-amber-700">Uso Prioritário</span>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="text-xs text-stone-600 leading-relaxed pt-2">
-                  Itens não saem do estoque aleatoriamente. A Mise consome lotes mais antigos primeiro e calcula
-                  o piso mínimo de liquidação (F15) para você nunca vender pratos abaixo do custo afundado.
-                </p>
               </div>
             )}
 
-            {showcaseTab === 'valor' && (
+            {showcaseTab === 'nfe' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between pb-4 border-b border-stone-100">
-                  <div>
-                    <span className="text-[10px] font-mono font-bold uppercase text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      Fórmula F48 · Central de Valor "A Mise te trouxe R$ X"
-                    </span>
-                    <h3 className="text-base font-bold text-stone-900 mt-1">
-                      Separação estrita: Identificado (Potencial) vs Realizado (Comprovado)
-                    </h3>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
-                    R$ 3.840,00 Realizados
+                <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                  <span className="text-orange-400 font-bold uppercase tracking-wider text-[11px]">
+                    F44 · PARSER DETERMINÍSTICO DE XML NF-e
                   </span>
+                  <span className="text-emerald-400 text-[10px]">Validação XXE ativa</span>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div className="p-4 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-xs font-bold text-stone-800 block mb-1">R$ Identificado</span>
-                    <div className="text-2xl font-black font-mono text-stone-900">R$ 5.420,00</div>
-                    <p className="text-[11px] text-stone-500 mt-1">
-                      Oportunidades mapeadas em renegociações de carne, queijos e embalagens.
-                    </p>
-                  </div>
-                  <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200">
-                    <span className="text-xs font-bold text-emerald-900 block mb-1">R$ Realizado (Comprovado)</span>
-                    <div className="text-2xl font-black font-mono text-emerald-700">R$ 3.840,00</div>
-                    <p className="text-[11px] text-emerald-800 mt-1">
-                      Evidenciado por notas fiscais emitidas com custo menor e reajuste confirmado.
-                    </p>
-                  </div>
-                </div>
-
-                <p className="text-xs text-stone-600 leading-relaxed pt-2">
-                  Nunca somamos promessas como se fossem ganhos. Cada centavo registrado na Central de Valor
-                  possui trilha imutável no AuditLog e justificativa auditável em português claro.
+                <p className="text-neutral-300 font-sans text-xs leading-relaxed">
+                  Sem OCR frágil e sem inteligência artificial aproximada. O arquivo XML oficial da SEFAZ é lido
+                  diretamente e convertido para centavos inteiros com reconciliação de tributos.
                 </p>
+                <div className="bg-neutral-900 p-3.5 rounded-xl border border-neutral-800 space-y-2">
+                  <div className="flex justify-between text-neutral-400 text-[11px]">
+                    <span>Nota: #00049182 (Distribuidora Paulista Ltda)</span>
+                    <span className="text-emerald-400">100% Mapeada</span>
+                  </div>
+                  <div className="text-white font-mono text-xs">
+                    Entrada de 24x Caixas de Leite Integral 1L (Convertido para 24.000 ml · R$ 0,0052/ml)
+                  </div>
+                </div>
               </div>
             )}
 
             {showcaseTab === 'caixa' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between pb-4 border-b border-stone-100">
-                  <div>
-                    <span className="text-[10px] font-mono font-bold uppercase text-stone-800 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">
-                      Fórmula F28 & F30 · Ponto de Equilíbrio & Retirada Segura
-                    </span>
-                    <h3 className="text-base font-bold text-stone-900 mt-1">
-                      Você sabe em qual dia do mês seu restaurante começa a lucrar?
-                    </h3>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-stone-900 bg-stone-100 px-3 py-1 rounded-lg border border-stone-200">
-                    Ponto no Dia 19
+                <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                  <span className="text-orange-400 font-bold uppercase tracking-wider text-[11px]">
+                    F29 & F30 · FLUXO DE CAIXA EM 3 CENÁRIOS & RETIRADA SEGURA
                   </span>
+                  <span className="text-neutral-400 text-[10px]">Horizonte de 30 dias</span>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-500 block text-[11px]">Custos Fixos Mensais</span>
-                    <span className="font-mono font-bold text-stone-900 text-sm">R$ 22.400,00</span>
-                  </div>
-                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-500 block text-[11px]">Margem de Contribuição Média</span>
-                    <span className="font-mono font-bold text-emerald-700 text-sm">58,2%</span>
-                  </div>
-                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-                    <span className="text-emerald-900 block text-[11px]">Retirada Segura do Dono (F30)</span>
-                    <span className="font-mono font-bold text-emerald-950 text-sm">R$ 8.200,00</span>
-                  </div>
-                </div>
-
-                <p className="text-xs text-stone-600 leading-relaxed pt-2">
-                  A Retirada Segura simula seu fluxo de caixa em 3 cenários (base, vendas -15% e vendas +15%),
-                  deduz provisões de 13º/férias e Simples Nacional (F35), garantindo que você nunca tire pró-labore
-                  que deixe a conta no vermelho.
+                <p className="text-neutral-300 font-sans text-xs leading-relaxed">
+                  Projeta o menor saldo futuro com base nos recebíveis de cartão e prazos de fornecedores.
+                  Você sabe o dia exato em que o caixa pode apertar com antecedência para tomar decisões.
                 </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  <div className="bg-neutral-900 p-3.5 rounded-xl border border-neutral-800">
+                    <div className="text-neutral-400 text-[10px]">Menor Saldo Previsto (Cenário Base)</div>
+                    <div className="text-base font-bold text-white mt-1">R$ 18.420,00 (em 18/11)</div>
+                  </div>
+                  <div className="bg-neutral-900 p-3.5 rounded-xl border border-neutral-800">
+                    <div className="text-neutral-400 text-[10px]">Reserva de Imposto (Simples Nacional)</div>
+                    <div className="text-base font-bold text-orange-400 mt-1">R$ 4.820,00 Provisionados</div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -639,166 +797,60 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </section>
 
       {/* =========================================================================
-          5. OS 9 PILARES OPERACIONAIS (F01 a F52)
+          SEGURANÇA & ISOLAMENTO DE DADOS (Privacidade Absoluta)
          ========================================================================= */}
-      <section id="recursos" className="py-20 bg-white border-b border-stone-200">
+      <section className="py-20 bg-neutral-50/70 border-t border-neutral-200/80 relative z-10" id="seguranca">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-16">
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-100/70 px-3 py-1 rounded-md">
-              Engenharia Operacional
-            </span>
-            <h2 className="mt-3 text-3xl sm:text-4xl font-extrabold text-stone-950 tracking-tight">
-              A arquitetura completa dos 9 pilares da Mise
-            </h2>
-            <p className="mt-3 text-sm text-stone-600">
-              Cada função foi codificada em TypeScript puro, com documentação matemática, casos de borda
-              e testes automatizados de conservação.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Pilar 1 */}
-            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 hover:border-stone-300 transition-all">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold text-sm mb-4">
-                <UtensilsIcon />
-              </div>
-              <h3 className="text-base font-bold text-stone-900 mb-2">1. Custos & Preços (F01–F08)</h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Fichas técnicas com sub-receitas ilimitadas, simulador "E-se" de insumo, ranking de sensibilidade
-                e índice de inflação da cozinha por Laspeyres.
-              </p>
-            </div>
-
-            {/* Pilar 2 */}
-            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 hover:border-stone-300 transition-all">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold text-sm mb-4">
-                <Boxes className="w-5 h-5" />
-              </div>
-              <h3 className="text-base font-bold text-stone-900 mb-2">2. Estoque & FEFO (F09–F16)</h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Curva ABC×XYZ de insumos, lote econômico de compra (EOQ), controle rigoroso de validade FEFO
-                e variância de uso (teórico vs real por contagem).
-              </p>
-            </div>
-
-            {/* Pilar 3 */}
-            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 hover:border-stone-300 transition-all">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold text-sm mb-4">
-                <FileSpreadsheet className="w-5 h-5" />
-              </div>
-              <h3 className="text-base font-bold text-stone-900 mb-2">3. Compras & NF-e XML (F17–F21)</h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Leitura de XML de NF-e conforme leiaute oficial da SEFAZ, detecção de preços fora da curva por
-                z-score MAD e lista otimizada com múltiplos de embalagem.
-              </p>
-            </div>
-
-            {/* Pilar 4 */}
-            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 hover:border-stone-300 transition-all">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold text-sm mb-4">
-                <BarChart3 className="w-5 h-5" />
-              </div>
-              <h3 className="text-base font-bold text-stone-900 mb-2">4. Vendas & Margem Líquida (F22–F27)</h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Previsão de demanda determinística por Holt-Winters sazonal semanal, margem líquida real por canal
-                (Salão vs iFood) e meta diária balanceada.
-              </p>
-            </div>
-
-            {/* Pilar 5 */}
-            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 hover:border-stone-300 transition-all">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold text-sm mb-4">
-                <Coins className="w-5 h-5" />
-              </div>
-              <h3 className="text-base font-bold text-stone-900 mb-2">5. Financeiro & Fluxo de Caixa (F28–F37)</h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Ponto de equilíbrio, projeção de caixa em 3 cenários, simulação de retirada segura para os sócios,
-                custo de maquininhas e provisões do Simples Nacional.
-              </p>
-            </div>
-
-            {/* Pilar 6 */}
-            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 hover:border-stone-300 transition-all">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold text-sm mb-4">
-                <Layers className="w-5 h-5" />
-              </div>
-              <h3 className="text-base font-bold text-stone-900 mb-2">6. Governança & Raio-X (F46–F52)</h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Fechamento mensal com trava de período (anti-alterações retroativas), relatório mensal Raio-X
-                para o contador e Central de Valor F48.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* =========================================================================
-          6. POR QUE DETERMINÍSTICO? (ANTI-AI SLOP MANIFESTO)
-         ========================================================================= */}
-      <section id="matematica" className="py-16 bg-stone-950 text-white border-b border-stone-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            <div className="lg:col-span-7 space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-stone-900 border border-stone-700 text-amber-400 text-xs font-bold">
-                <Scale className="w-3.5 h-3.5" />
-                <span>Nosso Compromisso Matemático</span>
-              </div>
-              <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
-                Por que a Mise proíbe "IA alucinada" e números inventados?
-              </h2>
-              <p className="text-stone-300 text-xs sm:text-sm leading-relaxed">
-                Em comércio alimentício, um erro de 3% no cálculo do CMV pode significar a diferença entre pagar
-                o aluguel ou entrar no cheque especial. Plataformas que usam "IA generativa" para chutar margem
-                são perigosas para o seu negócio.
-              </p>
-              <div className="space-y-3 pt-2 text-xs text-stone-300">
-                <div className="flex items-start gap-2">
-                  <div className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center text-[10px] font-bold mt-0.5">
-                    ✓
-                  </div>
-                  <span>
-                    <strong>Matemática pura e auditável:</strong> cada cálculo tem fórmula publicada em{' '}
-                    <code className="text-amber-400 bg-stone-900 px-1 py-0.5 rounded font-mono">docs/formulas/</code>{' '}
-                    e botão "Como calculamos" em português claro.
-                  </span>
+          <div className="max-w-4xl mx-auto bg-white rounded-3xl border border-neutral-200 p-8 sm:p-12 shadow-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 pb-8 border-b border-neutral-100">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-neutral-950 text-orange-500 flex items-center justify-center shrink-0">
+                  <Lock className="w-6 h-6 stroke-[2]" />
                 </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center text-[10px] font-bold mt-0.5">
-                    ✓
-                  </div>
-                  <span>
-                    <strong>Valores em centavos (BigInt):</strong> nunca usamos ponto flutuante (float) para dinheiro.
-                    Cada centavo confere com seu extrato e suas notas fiscais.
-                  </span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center text-[10px] font-bold mt-0.5">
-                    ✓
-                  </div>
-                  <span>
-                    <strong>Sem dados fictícios:</strong> se faltam dias de vendas ou contagens, o sistema não chuta;
-                    ele avisa com precisão: <em>"Faltam 5 dias de vendas para alta confiança"</em>.
-                  </span>
+                <div>
+                  <h3 className="text-xl font-bold text-neutral-950">
+                    Privacidade Absoluta: Cada Dono, Cada Empresa
+                  </h3>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Seus dados de faturamento, fichas técnicas e fornecedores nunca são expostos.
+                  </p>
                 </div>
               </div>
-            </div>
 
-            <div className="lg:col-span-5 bg-stone-900 p-6 rounded-2xl border border-stone-800 text-xs space-y-3">
-              <span className="text-[10px] uppercase font-mono font-bold text-amber-400 tracking-wider block">
-                Inspeção de Auditoria ao Vivo
+              <span className="px-3.5 py-1.5 rounded-full text-xs font-mono font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+                Criptografia SHA-256 Ativa
               </span>
-              <div className="bg-black/60 p-3 rounded-xl border border-stone-800 font-mono text-[11px] text-stone-300 space-y-1">
-                <div className="text-stone-500">// F33: Decomposição Analítica do CMV</div>
-                <div>ΔCMV = Σ(q1·p1) - Σ(q0·p0)</div>
-                <div className="text-emerald-400">Efeito Preço: +R$ 1.240,00</div>
-                <div className="text-amber-400">Efeito Volume: +R$ 820,00</div>
-                <div className="text-rose-400">Efeito Variância/Uso: -R$ 410,00</div>
-                <div className="text-stone-400 pt-1 border-t border-stone-800">
-                  Preço + Volume + Uso ≡ ΔCMV Exato
-                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-8">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-900 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-orange-600" />
+                  <span>Senha Obrigatória</span>
+                </h4>
+                <p className="text-xs text-neutral-600 mt-2 leading-relaxed">
+                  O acesso à sua empresa requer e-mail e senha validados criptograficamente. Não existem acessos sem senha.
+                </p>
               </div>
-              <div className="text-[11px] text-stone-400 leading-relaxed">
-                Testes automatizados contínuos garantem que nenhum cálculo sofra desvio ou inconsistência contábil.
+
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-900 flex items-center gap-1.5">
+                  <Boxes className="w-4 h-4 text-orange-600" />
+                  <span>Isolamento Total</span>
+                </h4>
+                <p className="text-xs text-neutral-600 mt-2 leading-relaxed">
+                  Cada usuário cadastrado tem seu banco de dados privado. Nenhum outro gestor tem acesso ao seu cardápio.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-900 flex items-center gap-1.5">
+                  <Scale className="w-4 h-4 text-orange-600" />
+                  <span>Exportação em 1 Toque</span>
+                </h4>
+                <p className="text-xs text-neutral-600 mt-2 leading-relaxed">
+                  Seus dados são seus. Baixe um backup completo em JSON a qualquer momento em Ajustes com auditoria LGPD.
+                </p>
               </div>
             </div>
           </div>
@@ -806,108 +858,58 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </section>
 
       {/* =========================================================================
-          7. DEPOIMENTOS & CASOS DE SUCESSO
+          FAQ ACCORDION (Perguntas Cruciais do Dono)
          ========================================================================= */}
-      <section id="depoimentos" className="py-16 bg-white border-b border-stone-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-12">
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-100/70 px-3 py-1 rounded-md">
-              Depoimentos Reais
-            </span>
-            <h2 className="mt-3 text-2xl sm:text-3xl font-extrabold text-stone-950 tracking-tight">
-              Quem usa a Mise não volta para planilhas quebradas
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between">
-              <p className="text-xs text-stone-700 italic leading-relaxed">
-                "No primeiro mês com a Mise, identificamos uma variação de 600g de bacon por dia no turno da noite.
-                Corrigimos a porção e economizamos R$ 2.400 em trinta dias."
-              </p>
-              <div className="mt-4 pt-4 border-t border-stone-200/80">
-                <span className="font-bold text-xs text-stone-900 block">Marcelo Brandão</span>
-                <span className="text-[11px] text-stone-500">Dono da Smash & Co. (Hamburgueria)</span>
-              </div>
-            </div>
-
-            <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between">
-              <p className="text-xs text-stone-700 italic leading-relaxed">
-                "O importador de NF-e acabou com o inferno de redigitar notas fiscais. O custo dos produtos
-                atualiza sozinho e o fechamento do mês para o contador é feito em 10 minutos."
-              </p>
-              <div className="mt-4 pt-4 border-t border-stone-200/80">
-                <span className="font-bold text-xs text-stone-900 block">Camila Rodrigues</span>
-                <span className="text-[11px] text-stone-500">Sócia da Confeitaria Doce Grão</span>
-              </div>
-            </div>
-
-            <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between">
-              <p className="text-xs text-stone-700 italic leading-relaxed">
-                "Saber exatamente qual é o nosso ponto de equilíbrio e o valor de retirada segura tirou o aperto
-                no peito de não saber se ia sobrar dinheiro no final do mês."
-              </p>
-              <div className="mt-4 pt-4 border-t border-stone-200/80">
-                <span className="font-bold text-xs text-stone-900 block">Gustavo Peixoto</span>
-                <span className="text-[11px] text-stone-500">Chef & Proprietário do Bistrô Peixoto</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* =========================================================================
-          8. PERGUNTAS FREQUENTES (FAQ)
-         ========================================================================= */}
-      <section className="py-16 bg-stone-50 border-b border-stone-200">
+      <section className="py-20 bg-white relative z-10">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-10">
-            <h2 className="text-2xl font-extrabold text-stone-950 tracking-tight">
-              Perguntas Frequentes
+          <div className="text-center mb-12">
+            <span className="text-xs font-bold uppercase tracking-widest text-neutral-500">
+              Dúvidas Frequentes
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black text-neutral-950 tracking-tight mt-2">
+              Perguntas diretas, respostas transparentes.
             </h2>
-            <p className="text-xs text-stone-500 mt-1">
-              Tudo o que você precisa saber sobre a Mise e sua instalação.
-            </p>
           </div>
 
           <div className="space-y-3">
             {[
               {
-                q: 'Como funciona a importação de notas fiscais (NF-e)?',
-                a: 'Basta arrastar o arquivo .XML da nota fiscal de compra emitida pelo seu fornecedor. O parser lê os itens, cadastra novos produtos ou mapeia para insumos existentes e recalcula o custo médio ponderado automaticamente.',
+                q: 'Como a Mise garante que os cálculos nunca erram centavos?',
+                a: 'Todos os valores monetários no sistema são gravados e computados em centavos inteiros (BigInt / integer cents). Em vez de usar divisões de ponto flutuante que geram resíduos como R$ 0,000000004, o motor utiliza bases exatas em microcentavos e pontos-base, eliminando 100% dos erros de arredondamento.',
               },
               {
-                q: 'Como a Mise trata a privacidade e meus dados financeiros?',
-                a: 'Seguimos o princípio de instalação única por empresa (ADR-0001). Seus dados pertencem exclusivamente a você e ao seu estabelecimento. Toda alteração possui trilha imutável no AuditLog em conformidade com a LGPD.',
+                q: 'Como funciona a privacidade de dados entre diferentes donos?',
+                a: 'Cada conta possui uma empresa privada com chave exclusiva no armazenamento criptografado. O login exige e-mail e senha validados por SHA-256 com salt. Ninguém consegue visualizar dados ou trocar de perfil sem a senha correta.',
               },
               {
-                q: 'Preciso ter conhecimentos avançados em contabilidade ou finanças?',
-                a: 'Não. Todas as 52 fórmulas matemáticas rodam em segundo plano e exibem frases curtas com o valor em R$ em jogo e uma ação prática em 1 clique (ex: "Reajustar prato", "Criar pedido", "Auditar lote").',
+                q: 'Eu preciso substituir meu PDV de caixa atual para usar a Mise?',
+                a: 'Não! A Mise não é um PDV de frente de caixa e não concorre com seu sistema de atendimento. A Mise é a inteligência de retaguarda: você importa as vendas do seu iFood ou PDV atual e as notas fiscais dos fornecedores, e o sistema faz toda a engenharia de cardápio e estoque.',
               },
               {
-                q: 'Posso testar antes de cadastrar meus insumos reais?',
-                a: 'Sim! Ao clicar em "Cadastrar-se" ou "Entrar", você tem a opção de pré-carregar um modelo completo de hamburgueria e bistrô artesanal para experimentar imediatamente.',
+                q: 'Quanto tempo leva para cadastrar os primeiros insumos e fichas técnicas?',
+                a: 'Menos de 10 minutos. Ao importar sua primeira nota fiscal eletrônica (XML), o sistema já cadastra os insumos com os preços reais pagos. Você também pode inicializar com o catálogo calibrado de exemplo.',
               },
             ].map((faq, idx) => {
               const isOpen = openFaqIndex === idx;
               return (
                 <div
                   key={idx}
-                  className="bg-white rounded-xl border border-stone-200/80 overflow-hidden"
+                  className="bg-neutral-50 border border-neutral-200 rounded-2xl overflow-hidden transition-all"
                 >
                   <button
+                    type="button"
                     onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
-                    className="w-full flex items-center justify-between p-4 text-left text-xs font-bold text-stone-900 hover:bg-stone-50 cursor-pointer"
+                    className="w-full flex items-center justify-between p-5 text-left text-xs font-bold text-neutral-900 cursor-pointer hover:bg-neutral-100/60 transition-colors"
                   >
                     <span>{faq.q}</span>
                     {isOpen ? (
-                      <ChevronUp className="w-4 h-4 text-stone-500" />
+                      <ChevronUp className="w-4 h-4 text-neutral-500 shrink-0 ml-2" />
                     ) : (
-                      <ChevronDown className="w-4 h-4 text-stone-500" />
+                      <ChevronDown className="w-4 h-4 text-neutral-500 shrink-0 ml-2" />
                     )}
                   </button>
                   {isOpen && (
-                    <div className="px-4 pb-4 pt-1 text-xs text-stone-600 leading-relaxed border-t border-stone-100 bg-stone-50/40">
+                    <div className="px-5 pb-5 pt-1 text-xs text-neutral-600 leading-relaxed border-t border-neutral-200/50">
                       {faq.a}
                     </div>
                   )}
@@ -919,75 +921,69 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </section>
 
       {/* =========================================================================
-          9. BOTTOM CALL TO ACTION (LOGIN & CADASTRO)
+          BANNER FINAL DE CONVERSÃO (Preto Minimalista com Acento Laranja)
          ========================================================================= */}
-      <section className="py-20 bg-stone-900 text-white relative overflow-hidden">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-          <div className="w-12 h-12 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center mx-auto mb-6 shadow-md">
-            <ChefHat className="w-7 h-7 stroke-[2]" />
+      <section className="py-20 bg-neutral-950 text-white relative z-10 border-t border-neutral-900">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-orange-400 mb-4 font-mono">
+            <span>Comece Hoje Mesmo</span>
+            <span aria-hidden="true">·</span>
+            <span>Sem Cartão de Crédito</span>
           </div>
 
-          <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Pronto para colocar o financeiro do seu restaurante no piloto firme?
+          <h2 className="text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight text-balance">
+            Pronto para colocar o controle da sua cozinha em outro patamar?
           </h2>
-          <p className="mt-4 text-sm text-stone-300 max-w-xl mx-auto leading-relaxed">
-            Cadastre seu estabelecimento em menos de 1 minuto ou acesse com sua conta existente.
+
+          <p className="mt-5 text-neutral-400 text-sm sm:text-base max-w-2xl mx-auto text-balance">
+            Crie sua conta em 30 segundos, defina sua senha exclusiva e tenha acesso imediato a todas as fórmulas
+            de engenharia de cardápio, estoques FEFO e fluxo de caixa da Mise.
           </p>
 
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
             <button
               type="button"
               onClick={() => openAuth('register')}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl text-sm font-bold text-stone-950 bg-amber-400 hover:bg-amber-300 shadow-md transition-all cursor-pointer"
+              className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-8 py-4 rounded-xl text-sm font-bold text-neutral-950 bg-orange-500 hover:bg-orange-400 transition-all shadow-lg hover:shadow-orange-500/20 cursor-pointer group"
             >
-              <UserPlus className="w-4 h-4" />
-              <span>Cadastrar Estabelecimento (Grátis)</span>
+              <span>Cadastrar Minha Empresa Agora</span>
+              <ArrowRight className="w-4 h-4 text-neutral-950 group-hover:translate-x-1 transition-transform" />
             </button>
 
             <button
               type="button"
               onClick={() => openAuth('login')}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl text-sm font-bold text-white bg-stone-800 hover:bg-stone-700 border border-stone-700 transition-all cursor-pointer"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-4 rounded-xl text-sm font-bold text-white bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 transition-all cursor-pointer"
             >
-              <LogIn className="w-4 h-4 text-amber-400" />
-              <span>Entrar / Acessar Minha Conta</span>
+              <LogIn className="w-4 h-4 text-orange-400" />
+              <span>Já Tenho Conta (Entrar)</span>
             </button>
           </div>
         </div>
       </section>
 
       {/* =========================================================================
-          10. FOOTER
+          RODAPÉ MINIMALISTA (Quiet Footer)
          ========================================================================= */}
-      <footer className="bg-stone-950 border-t border-stone-800 text-stone-500 text-xs py-8">
+      <footer className="py-8 bg-neutral-950 border-t border-neutral-900/80 text-xs text-neutral-500 relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-stone-800 text-amber-400 flex items-center justify-center">
-              <ChefHat className="w-4 h-4 stroke-[2]" />
-            </div>
-            <span className="font-bold text-stone-300">Mise</span>
-            <span>· Gestão Financeira & Engenharia de Alimentos</span>
+            <span className="font-extrabold text-white text-sm">Mise</span>
+            <span className="w-1 h-1 rounded-full bg-orange-500" />
+            <span>Gestão para Comércio Alimentício & Engenharia de Margem</span>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px]">
-            <span>Instalação Única por Empresa</span>
-            <span>·</span>
-            <span>Dinheiro em Centavos (BigInt)</span>
-            <span>·</span>
-            <button
-              type="button"
-              onClick={() => openAuth('login')}
-              className="text-amber-400 hover:underline cursor-pointer"
-            >
-              Acesso ao Sistema
-            </button>
+          <div className="flex items-center gap-4 text-[11px] text-neutral-400">
+            <span>Matemática Pura em Centavos (BigInt)</span>
+            <span aria-hidden="true">·</span>
+            <span>Aviso fiscal: confirme parâmetros com seu contador</span>
+            <span aria-hidden="true">·</span>
+            <span>© 2026 Mise</span>
           </div>
         </div>
       </footer>
 
-      {/* =========================================================================
-          AUTH MODAL (LOGIN & REGISTRO)
-         ========================================================================= */}
+      {/* Modal de Autenticação Segura */}
       <AuthModal
         isOpen={authModalOpen}
         initialMode={authMode}
@@ -998,19 +994,3 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     </div>
   );
 };
-
-// Helper simple icon for utensils
-function UtensilsIcon() {
-  return (
-    <svg
-      className="w-5 h-5 stroke-[2] fill-none stroke-current"
-      viewBox="0 0 24 24"
-    >
-      <path d="M18 2v6a3 3 0 0 1-3 3 3 3 0 0 1-3-3V2" />
-      <path d="M15 2v10" />
-      <path d="M12 22V11" />
-      <path d="M6 2v20" />
-      <path d="M6 2a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3" />
-    </svg>
-  );
-}

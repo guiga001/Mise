@@ -1,0 +1,102 @@
+{
+  "companyId": "test",
+  "conversations": [],
+  "messages": {},
+  "tags": [
+    {
+      "id": "tag_novo_1793635508311",
+      "companyId": "test",
+      "name": "Novo Cliente",
+      "color": "#0284c7",
+      "description": "Primeiro contato"
+    },
+    {
+      "id": "tag_pedido_1793635508312",
+      "companyId": "test",
+      "name": "Pedido em Andamento",
+      "color": "#ea580c",
+      "description": "Cozinha preparando"
+    },
+    {
+      "id": "tag_pag_1793635508313",
+      "companyId": "test",
+      "name": "Aguardando Pagamento",
+      "color": "#d97706",
+      "description": "Pix ou link pendente"
+    },
+    {
+      "id": "tag_entrega_1793635508315",
+      "companyId": "test",
+      "name": "Saiu para Entrega",
+      "color": "#7c3aed",
+      "description": "Com entregador"
+    },
+    {
+      "id": "tag_vip_1793635508316",
+      "companyId": "test",
+      "name": "Cliente Recorrente VIP",
+      "color": "#16a34a",
+      "description": "Cliente fiel"
+    },
+    {
+      "id": "tag_duvida_1793635508317",
+      "companyId": "test",
+      "name": "Dúvida / Reclamação",
+      "color": "#dc2626",
+      "description": "Atenção especial"
+    }
+  ],
+  "quickReplies": [
+    {
+      "id": "qr_1_1793635508312",
+      "companyId": "test",
+      "shortcut": "ola",
+      "title": "Boas-vindas Padrão",
+      "category": "Boas-vindas",
+      "content": "Olá! Seja muito bem-vindo ao nosso restaurante. Como podemos te ajudar hoje?",
+      "usageCount": 0,
+      "createdAt": "2026-11-02T16:05:08.311Z"
+    },
+    {
+      "id": "qr_2_1793635508312",
+      "companyId": "test",
+      "shortcut": "cardapio",
+      "title": "Envio de Cardápio",
+      "category": "Cardápio",
+      "content": "Você pode conferir nosso cardápio completo, opções artesanais e sobremesas da casa! Qual delícia você gostaria de pedir hoje?",
+      "usageCount": 0,
+      "createdAt": "2026-11-02T16:05:08.311Z"
+    },
+    {
+      "id": "qr_3_1793635508312",
+      "companyId": "test",
+      "shortcut": "preparo",
+      "title": "Pedido Confirmado em Preparo",
+      "category": "Pedidos",
+      "content": "Seu pedido foi confirmado! Nossa cozinha já iniciou o preparo dos ingredientes com todo o capricho.",
+      "usageCount": 0,
+      "createdAt": "2026-11-02T16:05:08.311Z"
+    },
+    {
+      "id": "qr_4_1793635508312",
+      "companyId": "test",
+      "shortcut": "entrega",
+      "title": "Saiu para Entrega",
+      "category": "Entrega",
+      "content": "Boas notícias! Seu pedido acabou de sair para entrega. O entregador chegará em breve ao seu endereço.",
+      "usageCount": 0,
+      "createdAt": "2026-11-02T16:05:08.311Z"
+    },
+    {
+      "id": "qr_5_1793635508312",
+      "companyId": "test",
+      "shortcut": "obrigado",
+      "title": "Agradecimento Pós-Pedido",
+      "category": "Finalização",
+      "content": "Agradecemos muito pela preferência! Esperamos que sua experiência gastronômica tenha sido incrível. Qualquer feedback é bem-vindo!",
+      "usageCount": 0,
+      "createdAt": "2026-11-02T16:05:08.311Z"
+    }
+  ],
+  "internalNotes": {}
+}
