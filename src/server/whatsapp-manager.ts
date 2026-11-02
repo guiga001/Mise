@@ -89,6 +89,24 @@ export class WhatsAppManager {
     return dir;
   }
 
+  private cleanOrphanSessionFiles(companyId: string) {
+    try {
+      const dir = this.getSessionDir(companyId);
+      const credsFile = path.join(dir, 'creds.json');
+      // Se não há creds.json, quaisquer outros arquivos residuais (pre-keys, etc.) são órfãos de handshakes anteriores interrompidos
+      if (!fs.existsSync(credsFile)) {
+        if (fs.existsSync(dir)) {
+          const files = fs.readdirSync(dir);
+          for (const file of files) {
+            fs.rmSync(path.join(dir, file), { recursive: true, force: true });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[WhatsApp] Aviso ao limpar resíduos de sessão ${companyId}:`, e);
+    }
+  }
+
   // Obter status atual da sessão
   getSessionInfo(companyId: string): WhatsAppSessionInfo {
     const s = this.sessions.get(companyId);
@@ -274,36 +292,57 @@ export class WhatsAppManager {
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
         const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const isRestartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
 
         console.log(
-          `[Mise Atendimento] Conexão encerrada para restaurante ${companyId}. Código: ${statusCode}, isLoggedOut: ${isLoggedOut}`
+          `[Mise Atendimento] Conexão encerrada para restaurante ${companyId}. Código: ${statusCode}, isLoggedOut: ${isLoggedOut}, isRestartRequired: ${isRestartRequired}, statusAtual: ${sessionState.status}`
         );
 
         sessionState.lastDisconnectReason = `Desconectado (código ${statusCode || 'fechamento normal'})`;
+        sessionState.socket = null;
 
         if (isLoggedOut) {
           sessionState.status = 'DISCONNECTED';
-          sessionState.socket = null;
           sessionState.phoneNumber = undefined;
           sessionState.qrCodeDataUrl = undefined;
+          sessionState.qrRaw = undefined;
           sessionState.pairingCode = undefined;
           this.clearSessionDiskFiles(companyId);
           this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
         } else {
-          if (sessionState.status === 'CONNECTED') {
-            sessionState.status = 'DISCONNECTED';
-            sessionState.socket = null;
+          // Se não foi logout explícito, nós DEVEMOS reconectar!
+          // Especialmente se o código for DisconnectReason.restartRequired (515), que o WhatsApp
+          // envia logo após a leitura do QR Code ou confirmação do Pairing Code no celular.
+          if (isRestartRequired) {
+            console.log(
+              `[Mise Atendimento] Pareamento confirmado pelo celular para ${companyId}. Reconectando para autenticação imediata...`
+            );
+            sessionState.status = 'CONNECTING';
+            sessionState.qrCodeDataUrl = undefined;
+            sessionState.qrRaw = undefined;
+            sessionState.pairingCode = undefined;
             this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
 
-            // Reconexão controlada automática se a conexão caiu por oscilação de rede
+            // Reconexão imediata com as novas credenciais salvas em disco
+            setTimeout(() => {
+              this.connectSession(companyId, false).catch((e) =>
+                console.error(`Erro ao autenticar sessão pós-pareamento para ${companyId}:`, e)
+              );
+            }, 600);
+          } else {
+            // Queda temporária de rede ou timeout
+            const wasConnected = sessionState.status === 'CONNECTED';
+            sessionState.status = wasConnected ? 'CONNECTING' : sessionState.status;
+            this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
+
             setTimeout(() => {
               const current = this.sessions.get(companyId);
-              if (current && current.status === 'DISCONNECTED') {
+              if (current && (current.status === 'CONNECTING' || current.status === 'DISCONNECTED')) {
                 this.connectSession(companyId, false).catch((e) =>
                   console.error(`Erro ao auto-reconectar empresa ${companyId}:`, e)
                 );
               }
-            }, 3000);
+            }, 2500);
           }
         }
       }
@@ -432,8 +471,13 @@ export class WhatsAppManager {
   // Iniciar conexão com WhatsApp via Baileys e gerar QR Code
   async connectSession(companyId: string, forceNew = false): Promise<WhatsAppSessionInfo> {
     ensureSessionsDir();
-    const sessionDir = this.getSessionDir(companyId);
+    if (forceNew) {
+      this.clearSessionDiskFiles(companyId);
+    } else {
+      this.cleanOrphanSessionFiles(companyId);
+    }
 
+    const sessionDir = this.getSessionDir(companyId);
     const existing = this.sessions.get(companyId);
 
     // Se já estiver conectado, apenas retorna a sessão
@@ -453,11 +497,6 @@ export class WhatsAppManager {
       } catch (e) {}
     }
 
-    // Se o usuário solicitou explicitamente um novo QR code (forceNew), limpa arquivos do disco para gerar novos tokens
-    if (forceNew) {
-      this.clearSessionDiskFiles(companyId);
-    }
-
     const sessionState: CompanySessionState = {
       companyId,
       socket: null,
@@ -473,15 +512,28 @@ export class WhatsAppManager {
       const sock = makeWASocket({
         auth: state,
         version,
-        browser: Browsers.ubuntu('Chrome'),
+        browser: Browsers.macOS('Desktop'),
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 25000,
-        syncFullHistory: true, // Puxa todo o histórico de conversas e mensagens
+        keepAliveIntervalMs: 30000,
+        syncFullHistory: false, // CRÍTICO: false evita carregamento infinito no celular
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect: true,
+        getMessage: async (key) => {
+          if (key?.id) {
+            const msg = atendimentoStore.getMessageById(companyId, key.id);
+            if (msg) {
+              return {
+                conversation: msg.text,
+              };
+            }
+          }
+          return {
+            conversation: '',
+          };
+        },
       });
 
       sessionState.socket = sock;
@@ -556,15 +608,28 @@ export class WhatsAppManager {
     const sock = makeWASocket({
       auth: state,
       version,
-      browser: Browsers.ubuntu('Chrome'),
+      browser: Browsers.macOS('Desktop'),
       printQRInTerminal: false,
       logger: pino({ level: 'silent' }),
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
-      syncFullHistory: true, // Puxa histórico completo assim que parear
+      keepAliveIntervalMs: 30000,
+      syncFullHistory: false, // CRÍTICO: false evita carregamento infinito no celular
       generateHighQualityLinkPreview: false,
       markOnlineOnConnect: true,
+      getMessage: async (key) => {
+        if (key?.id) {
+          const msg = atendimentoStore.getMessageById(companyId, key.id);
+          if (msg) {
+            return {
+              conversation: msg.text,
+            };
+          }
+        }
+        return {
+          conversation: '',
+        };
+      },
     });
 
     sessionState.socket = sock;
@@ -584,7 +649,7 @@ export class WhatsAppManager {
               resolved = true;
               if (timer) clearTimeout(timer);
               const formatted =
-                rawCode.length === 8 ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}` : rawCode;
+                rawCode && rawCode.length === 8 ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}` : rawCode;
               sessionState.pairingCode = formatted;
               sessionState.status = 'AWAITING_SCAN';
               this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
@@ -594,7 +659,7 @@ export class WhatsAppManager {
         } catch (err: any) {
           console.warn(`[Mise Atendimento] Tentativa de pareamento ${companyId}: ${err?.message}`);
           if (!resolved) {
-            // Tenta uma segunda vez após 2 segundos se for fechamento temporário
+            // Tenta uma segunda vez após 1.5 segundos se for fechamento temporário
             setTimeout(async () => {
               if (resolved) return;
               try {
@@ -602,7 +667,7 @@ export class WhatsAppManager {
                 resolved = true;
                 if (timer) clearTimeout(timer);
                 const formatted =
-                  retryCode.length === 8 ? `${retryCode.slice(0, 4)}-${retryCode.slice(4)}` : retryCode;
+                  retryCode && retryCode.length === 8 ? `${retryCode.slice(0, 4)}-${retryCode.slice(4)}` : retryCode;
                 sessionState.pairingCode = formatted;
                 sessionState.status = 'AWAITING_SCAN';
                 this.broadcast(companyId, 'session_status', this.getSessionInfo(companyId));
@@ -617,23 +682,23 @@ export class WhatsAppManager {
                   )
                 );
               }
-            }, 2000);
+            }, 1500);
           }
         }
       };
 
-      // Dispara quando o evento de conexão indicar que o handshake foi concluído
+      // Dispara quando o evento de conexão indicar que o handshake foi iniciado
       const onConnectionUpdate = (update: any) => {
         if (update.qr || update.connection === 'connecting') {
           sock.ev.off('connection.update', onConnectionUpdate);
-          setTimeout(triggerPairing, 1200);
+          setTimeout(triggerPairing, 800);
         }
       };
 
       sock.ev.on('connection.update', onConnectionUpdate);
 
-      // Fallback timer de 3s caso os eventos já tenham passado
-      setTimeout(triggerPairing, 3000);
+      // Fallback timer de 2s caso os eventos já tenham passado
+      setTimeout(triggerPairing, 2000);
 
       // Timeout máximo de 25s
       timer = setTimeout(() => {

@@ -80,6 +80,13 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
     };
   }, [isOpen, companyId]);
 
+  // Se abrir o modal na aba QR e estiver desconectado sem QR ativo, gera automaticamente
+  useEffect(() => {
+    if (isOpen && connectTab === 'qr' && sessionInfo.status === 'DISCONNECTED' && !sessionInfo.qrCodeDataUrl && !loading) {
+      handleStartConnect(false);
+    }
+  }, [isOpen, connectTab, sessionInfo.status, sessionInfo.qrCodeDataUrl]);
+
   if (!isOpen) return null;
 
   const handleStartConnect = async (forceNew = false) => {

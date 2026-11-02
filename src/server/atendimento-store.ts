@@ -255,6 +255,15 @@ export class AtendimentoStore {
     return [...list].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   }
 
+  getMessageById(companyId: string, messageId: string): WhatsAppMessage | undefined {
+    const data = this.load(companyId);
+    for (const convId of Object.keys(data.messages)) {
+      const found = data.messages[convId]?.find((m) => m.id === messageId);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
   addMessage(companyId: string, message: WhatsAppMessage): WhatsAppMessage {
     const data = this.load(companyId);
     if (!data.messages[message.conversationId]) {
