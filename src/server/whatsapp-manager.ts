@@ -534,29 +534,38 @@ export class WhatsAppManager {
   // Iniciar conexão com WhatsApp via Baileys e gerar QR Code
   async connectSession(companyId: string, forceNew = false): Promise<WhatsAppSessionInfo> {
     ensureSessionsDir();
+    const existing = this.sessions.get(companyId);
+
+    // Se forceNew for solicitado, encerra obrigatoriamente qualquer socket ativo e limpa os arquivos
     if (forceNew) {
+      if (existing?.socket) {
+        try {
+          existing.socket.end(undefined);
+        } catch (e) {}
+      }
       this.clearSessionDiskFiles(companyId);
+      this.sessions.delete(companyId);
     } else {
+      // Se não for forçado e já estiver conectado, apenas retorna a sessão
+      if (existing?.socket && existing.status === 'CONNECTED') {
+        return this.getSessionInfo(companyId);
+      }
+
+      // Se não for forçado e já temos um QR code ativo aguardando scan com imagem pronta, retorna o existente sem reiniciar o handshake
+      if (existing?.socket && existing.status === 'AWAITING_SCAN' && existing.qrCodeDataUrl) {
+        return this.getSessionInfo(companyId);
+      }
+
       this.cleanOrphanSessionFiles(companyId);
     }
 
     const sessionDir = this.getSessionDir(companyId);
-    const existing = this.sessions.get(companyId);
 
-    // Se já estiver conectado, apenas retorna a sessão
-    if (existing?.socket && existing.status === 'CONNECTED') {
-      return this.getSessionInfo(companyId);
-    }
-
-    // Se não for forçado e já temos um QR code ativo aguardando scan, retorna o existente sem reiniciar o handshake
-    if (!forceNew && existing?.socket && existing.status === 'AWAITING_SCAN' && existing.qrCodeDataUrl) {
-      return this.getSessionInfo(companyId);
-    }
-
-    // Se houver um socket prévio aberto, fecha com segurança antes de recriar
-    if (existing?.socket) {
+    // Se houver um socket prévio aberto em memória, fecha com segurança antes de recriar
+    const prev = this.sessions.get(companyId);
+    if (prev?.socket) {
       try {
-        existing.socket.end(undefined);
+        prev.socket.end(undefined);
       } catch (e) {}
     }
 
@@ -602,7 +611,7 @@ export class WhatsAppManager {
       sessionState.socket = sock;
       this.bindSocketEvents(sock, companyId, sessionState, saveCreds);
 
-      // Aguarda até 3.5s para retornar a resposta HTTP já com o QR Code pronto
+      // Aguarda até o QR Code DataURL ser devidamente gerado e transformado em imagem base64
       await new Promise<void>((resolve) => {
         let isDone = false;
         const complete = () => {
@@ -612,15 +621,28 @@ export class WhatsAppManager {
           }
         };
 
+        // Polling rápido (a cada 80ms) para detectar o instante exato em que qrCodeDataUrl foi gerado
+        const checkInterval = setInterval(() => {
+          if (sessionState.qrCodeDataUrl || sessionState.status === 'CONNECTED' || sessionState.status === 'ERROR') {
+            clearInterval(checkInterval);
+            complete();
+          }
+        }, 80);
+
         const updateListener = (update: any) => {
-          if (update.qr || sessionState.qrCodeDataUrl || update.connection === 'open') {
+          if (sessionState.qrCodeDataUrl || update.connection === 'open') {
+            clearInterval(checkInterval);
             sock.ev.off('connection.update', updateListener);
             complete();
           }
         };
 
         sock.ev.on('connection.update', updateListener);
-        setTimeout(complete, 3500);
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          sock.ev.off('connection.update', updateListener);
+          complete();
+        }, 6500);
       });
 
       return this.getSessionInfo(companyId);

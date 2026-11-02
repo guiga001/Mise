@@ -80,9 +80,15 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
     };
   }, [isOpen, companyId]);
 
-  // Se abrir o modal na aba QR e estiver desconectado sem QR ativo, gera automaticamente
+  // Se abrir o modal na aba QR e não estiver conectado nem tiver QR ativo, gera automaticamente
   useEffect(() => {
-    if (isOpen && connectTab === 'qr' && sessionInfo.status === 'DISCONNECTED' && !sessionInfo.qrCodeDataUrl && !loading) {
+    if (
+      isOpen &&
+      connectTab === 'qr' &&
+      sessionInfo.status !== 'CONNECTED' &&
+      !sessionInfo.qrCodeDataUrl &&
+      !loading
+    ) {
       handleStartConnect(false);
     }
   }, [isOpen, connectTab, sessionInfo.status, sessionInfo.qrCodeDataUrl]);
@@ -223,15 +229,26 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
               </div>
 
               {!confirmDisconnect ? (
-                <button
-                  type="button"
-                  onClick={() => setConfirmDisconnect(true)}
-                  disabled={loading}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Desconectar Este WhatsApp</span>
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleStartConnect(true)}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold text-white bg-neutral-950 hover:bg-neutral-900 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <RefreshCw className={`w-4 h-4 text-orange-400 ${loading ? 'animate-spin' : ''}`} />
+                    <span>{loading ? 'Gerando Novo QR Code...' : 'Trocar Aparelho / Gerar Novo QR Code'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDisconnect(true)}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Desconectar Este WhatsApp</span>
+                  </button>
+                </div>
               ) : (
                 <div className="p-4 bg-rose-50/90 border border-rose-200 rounded-2xl space-y-3 text-left">
                   <div>
@@ -350,16 +367,16 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
                         </button>
                       </div>
                     </div>
-                  ) : isConnecting ? (
+                  ) : isConnecting || loading ? (
                     <div className="text-center py-10 space-y-4">
                       <div className="w-12 h-12 rounded-2xl bg-neutral-950 text-orange-500 mx-auto flex items-center justify-center animate-pulse">
                         <RefreshCw className="w-6 h-6 animate-spin" />
                       </div>
                       <h4 className="text-sm font-bold text-neutral-900">
-                        Iniciando motor de conexão exclusivo...
+                        Gerando QR Code Oficial do WhatsApp...
                       </h4>
                       <p className="text-xs text-neutral-500 max-w-xs mx-auto">
-                        Preparando credenciais isoladas para o restaurante {companyName}. O QR Code aparecerá em instantes.
+                        Iniciando canal criptografado para o restaurante {companyName}. O código aparecerá em instantes.
                       </p>
                     </div>
                   ) : (
@@ -376,7 +393,7 @@ export const WhatsAppConnectModal: React.FC<WhatsAppConnectModalProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => handleStartConnect(false)}
+                        onClick={() => handleStartConnect(true)}
                         disabled={loading}
                         className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl text-xs font-bold text-white bg-neutral-950 hover:bg-neutral-900 border border-neutral-950 hover:border-orange-500 shadow-sm transition-all cursor-pointer"
                       >
