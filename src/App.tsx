@@ -25,7 +25,7 @@ import { SalesTab } from './components/SalesTab';
 import { FinancialTab } from './components/FinancialTab';
 import { ProductionTab } from './components/ProductionTab';
 import { SettingsTab } from './components/SettingsTab';
-import { AtendimentoTab } from './components/AtendimentoTab';
+import { IntegracoesTab } from './components/IntegracoesTab';
 import { IntelligenceTab } from './components/IntelligenceTab';
 
 export default function App() {
@@ -144,8 +144,8 @@ export default function App() {
             onNavigateTab={(tab) => setActiveTab(tab as any)}
           />
         )}
-        {activeTab === 'atendimento' && (
-          <AtendimentoTab
+        {activeTab === 'integracoes' && (
+          <IntegracoesTab
             database={database}
             onUpdateDatabase={handleUpdateDatabase}
           />

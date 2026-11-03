@@ -1,0 +1,42 @@
+{
+  "companyId": "comp_1793638954937_jobe2",
+  "configs": {
+    "ifood": {
+      "channel": "IFOOD",
+      "enabled": false,
+      "storeOpen": false,
+      "storeName": "",
+      "merchantId": "",
+      "clientId": "",
+      "clientSecret": "",
+      "defaultCommissionRate": 23,
+      "autoAcceptOrders": false,
+      "defaultPrepMinutes": 25,
+      "autoPrintReceipt": true,
+      "connectionStatus": "DISCONNECTED",
+      "lastStatusCheck": "2026-11-03T10:45:54.244Z",
+      "webhookUrl": "/api/integrations/ifood/webhook",
+      "environment": "PRODUCTION",
+      "lastSyncAt": "2026-11-03T10:45:59.057Z"
+    },
+    "food99": {
+      "channel": "99FOOD",
+      "enabled": false,
+      "storeOpen": false,
+      "storeName": "",
+      "merchantId": "",
+      "appId": "",
+      "appSecret": "",
+      "defaultCommissionRate": 15,
+      "autoAcceptOrders": false,
+      "defaultPrepMinutes": 20,
+      "autoPrintReceipt": true,
+      "connectionStatus": "DISCONNECTED",
+      "lastStatusCheck": "2026-11-03T10:45:54.244Z",
+      "webhookUrl": "/api/integrations/99food/webhook",
+      "environment": "PRODUCTION",
+      "lastSyncAt": "2026-11-03T10:45:59.057Z"
+    }
+  },
+  "orders": []
+}

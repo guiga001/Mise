@@ -20,7 +20,7 @@ import {
   ChevronDown,
   LogOut,
   Globe,
-  MessageSquare,
+  Layers,
   BrainCircuit,
 } from 'lucide-react';
 import { MiseDatabaseState } from '../lib/storage';
@@ -28,7 +28,7 @@ import { MiseDatabaseState } from '../lib/storage';
 export type TabKey =
   | 'dashboard'
   | 'intelligence'
-  | 'atendimento'
+  | 'integracoes'
   | 'recipes'
   | 'ingredients'
   | 'inventory'
@@ -61,7 +61,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   const navItems = [
     { key: 'dashboard' as TabKey, label: 'Painel', icon: LayoutDashboard },
     { key: 'intelligence' as TabKey, label: 'Inteligência', icon: BrainCircuit },
-    { key: 'atendimento' as TabKey, label: 'Atendimento', icon: MessageSquare },
+    { key: 'integracoes' as TabKey, label: 'Integrações', icon: Layers },
     { key: 'sales' as TabKey, label: 'Vendas', icon: UploadCloud },
     { key: 'purchases' as TabKey, label: 'Compras', icon: ShoppingCart },
     { key: 'inventory' as TabKey, label: 'Estoque', icon: PackageSearch },

@@ -58,7 +58,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showRegisterPassword, setShowRegisterPassword] = useState<boolean>(false);
   const [restaurantName, setRestaurantName] = useState<string>('');
   const [storeName, setStoreName] = useState<string>('Matriz');
-  const [loadDemoData, setLoadDemoData] = useState<boolean>(false);
   const [registerError, setRegisterError] = useState<string>('');
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -135,7 +134,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         password: registerPassword,
         companyName: restaurantName.trim(),
         storeName: storeName.trim() || 'Matriz',
-        loadDemoCatalog: loadDemoData,
       });
 
       setIsSubmitting(false);
@@ -435,22 +433,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              {/* Opção para carregar modelo demonstrativo com senha definida */}
-              <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  id="preloadDemoCheck"
-                  checked={loadDemoData}
-                  onChange={(e) => setLoadDemoData(e.target.checked)}
-                  className="mt-0.5 rounded text-stone-900 focus:ring-stone-900 cursor-pointer"
-                />
-                <label htmlFor="preloadDemoCheck" className="text-xs text-stone-700 cursor-pointer">
-                  <span className="font-bold block text-stone-900">
-                    Inicializar com catálogo de receitas e insumos de exemplo
-                  </span>
-                  Preenche fichas técnicas, insumos e simulações para testar a inteligência do sistema na sua nova empresa privada.
-                </label>
-              </div>
+
 
               <button
                 type="submit"

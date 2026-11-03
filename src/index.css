@@ -100,3 +100,55 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #d4d4d4;
 }
+
+/* =========================================================================
+   ESTILOS DE IMPRESSÃO (Térmica 80mm / Comandas / Relatórios)
+   ========================================================================= */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 2mm;
+  }
+
+  /* Oculta tudo na tela durante impressão padrão */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Exibe exclusivamente a comanda térmica */
+  #thermal-receipt,
+  #thermal-receipt * {
+    visibility: visible !important;
+  }
+
+  #thermal-receipt {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 74mm !important;
+    max-width: 74mm !important;
+    margin: 0 !important;
+    padding: 2mm 3mm !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+  }
+
+  /* Suporte a relatórios impressos */
+  .printable-report,
+  .printable-report * {
+    visibility: visible !important;
+  }
+
+  .printable-report {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+  }
+}
+

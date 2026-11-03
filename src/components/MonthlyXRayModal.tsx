@@ -42,7 +42,7 @@ export const MonthlyXRayModal: React.FC<MonthlyXRayModalProps> = ({
       title={`F52 · Relatório Raio-X do Mês (${periodLabel})`}
       subtitle="Documento executivo consolidado com conciliação matemática estrita para o Dono e Contabilidade."
     >
-      <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1">
+      <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1 printable-report">
         {/* Resumo Executivo */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">

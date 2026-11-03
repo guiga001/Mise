@@ -81,6 +81,75 @@ function createEmptyDatabase(): MiseDatabaseState {
 }
 
 /**
+ * Remove qualquer resquício de dados de exemplo, demonstração ou seeds anteriores.
+ */
+export function stripSampleData(state: MiseDatabaseState): MiseDatabaseState {
+  if (!state) return createEmptyDatabase();
+
+  const isDemoCompany =
+    state.company?.name === 'Bistrô & Burger Artesanal' ||
+    state.company?.id?.startsWith('comp_demo');
+
+  if (isDemoCompany) {
+    return createEmptyDatabase();
+  }
+
+  const sampleIngredientIds = new Set([
+    'ing_pao',
+    'ing_blend',
+    'ing_cheddar',
+    'ing_bacon',
+    'ing_molho',
+    'ing_batata',
+    'ing_embalagem',
+  ]);
+  const sampleRecipeIds = new Set(['rec_burger_smash', 'rec_batata_rustica']);
+  const sampleSupplierIds = new Set(['sup_1', 'sup_2', 'sup_3']);
+  const sampleLotIds = new Set(['lot_cheddar_1', 'lot_blend_1', 'lot_pao_1']);
+  const sampleMovementIds = new Set(['mov_pao_in', 'mov_blend_in']);
+  const sampleValueIds = new Set(['val_1', 'val_2', 'val_3']);
+  const sampleTaskIds = new Set(['task_1', 'task_2', 'task_3']);
+  const sampleAlertIds = new Set(['alt_1']);
+
+  const ingredients = (state.ingredients || []).filter(
+    (i) => !sampleIngredientIds.has(i.id)
+  );
+  const recipes = (state.recipes || []).filter(
+    (r) => !sampleRecipeIds.has(r.id)
+  );
+  const suppliers = (state.suppliers || []).filter(
+    (s) => !sampleSupplierIds.has(s.id)
+  );
+  const stockLots = (state.stockLots || []).filter(
+    (l) => !sampleLotIds.has(l.id)
+  );
+  const stockMovements = (state.stockMovements || []).filter(
+    (m) => !sampleMovementIds.has(m.id)
+  );
+  const valueEvents = (state.valueEvents || []).filter(
+    (v) => !sampleValueIds.has(v.id)
+  );
+  const dailyTasks = (state.dailyTasks || []).filter(
+    (t) => !sampleTaskIds.has(t.id)
+  );
+  const alerts = (state.alerts || []).filter(
+    (a) => !sampleAlertIds.has(a.id)
+  );
+
+  return {
+    ...state,
+    ingredients,
+    recipes,
+    suppliers,
+    stockLots,
+    stockMovements,
+    valueEvents,
+    dailyTasks,
+    alerts,
+  };
+}
+
+/**
  * Carrega o estado do banco do storage local.
  */
 export function loadDatabase(): MiseDatabaseState {
@@ -88,10 +157,11 @@ export function loadDatabase(): MiseDatabaseState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createEmptyDatabase();
     const parsed = JSON.parse(raw);
-    return {
+    const state = {
       ...createEmptyDatabase(),
       ...parsed,
     };
+    return stripSampleData(state);
   } catch (e) {
     console.error('Falha ao ler dados locais do Mise:', e);
     return createEmptyDatabase();

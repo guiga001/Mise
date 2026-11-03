@@ -9,6 +9,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { atendimentoRouter } from './src/server/atendimento-router';
+import { integrationsRouter } from './src/server/integrations-router';
 
 async function startServer() {
   const app = express();
@@ -18,7 +19,10 @@ async function startServer() {
   app.use(express.json({ limit: '25mb' }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-  // Rotas da API de Atendimento WhatsApp
+  // Rotas de Integrações de Delivery (iFood e 99Food)
+  app.use('/api/integrations', integrationsRouter);
+
+  // Rotas legadas da API de Atendimento
   app.use('/api/atendimento', atendimentoRouter);
 
   // Healthcheck endpoint

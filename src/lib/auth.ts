@@ -8,8 +8,13 @@
 
 import { hashPassword, verifyPassword } from './crypto';
 import { Company, Store, User } from '../domain/types';
-import { MiseDatabaseState, loadDatabase, saveDatabase, appendAuditLog } from './storage';
-import { createDemoSeedDatabase } from './demo-data';
+import {
+  MiseDatabaseState,
+  loadDatabase,
+  saveDatabase,
+  appendAuditLog,
+  stripSampleData,
+} from './storage';
 
 export interface UserAccount {
   id: string;
@@ -65,7 +70,7 @@ export function loadCompanyDatabase(companyId: string): MiseDatabaseState {
     const key = getCompanyDatabaseKey(companyId);
     const raw = localStorage.getItem(key);
     if (raw) {
-      return JSON.parse(raw);
+      return stripSampleData(JSON.parse(raw));
     }
   } catch (e) {
     console.error(`Erro ao carregar banco da empresa ${companyId}:`, e);
@@ -194,46 +199,13 @@ export function registerPrivateAccount(params: {
   const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const passwordHash = hashPassword(params.password);
 
-  let newDb: MiseDatabaseState;
-
-  if (params.loadDemoCatalog) {
-    // Carrega modelo de exemplo com fichas calibradas, isolado para este novo usuário
-    const demoSeed = createDemoSeedDatabase(cleanCompanyName, cleanName, cleanEmail);
-    newDb = {
-      ...demoSeed,
-      company: {
-        ...demoSeed.company!,
-        id: companyId,
-        name: cleanCompanyName,
-      },
-      stores: demoSeed.stores.map((s, idx) =>
-        idx === 0
-          ? { ...s, id: storeId, name: cleanStoreName }
-          : { ...s, id: `store_sub_${Date.now()}_${idx}` }
-      ),
-      users: [
-        {
-          id: userId,
-          name: cleanName,
-          email: cleanEmail,
-          passwordHash,
-          role: 'DONO',
-          storeIds: [storeId],
-          twoFactorEnabled: false,
-          createdAt: now,
-        },
-      ],
-      activeUserId: userId,
-      activeStoreId: storeId,
-    };
-  } else {
-    // Inicia banco 100% limpo e privado
-    const company: Company = {
-      id: companyId,
-      name: cleanCompanyName,
-      createdAt: now,
-      updatedAt: now,
-    };
+  // Inicia banco 100% limpo e privado, sem insumos ou receitas de exemplo
+  const company: Company = {
+    id: companyId,
+    name: cleanCompanyName,
+    createdAt: now,
+    updatedAt: now,
+  };
 
     const mainStore: Store = {
       id: storeId,
@@ -254,9 +226,9 @@ export function registerPrivateAccount(params: {
       createdAt: now,
     };
 
-    newDb = {
-      company,
-      stores: [mainStore],
+  const newDb: MiseDatabaseState = {
+    company,
+    stores: [mainStore],
       users: [user],
       activeUserId: userId,
       activeStoreId: storeId,
@@ -277,7 +249,6 @@ export function registerPrivateAccount(params: {
       valueEvents: [],
       dailyTasks: [],
     };
-  }
 
   // Registra auditoria da criação da conta
   const auditedDb = appendAuditLog(
