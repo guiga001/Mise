@@ -37,6 +37,12 @@ import {
   SlidersHorizontal,
   Layers,
   Trash2,
+  ShieldCheck,
+  Sparkles,
+  LogOut,
+  PlayCircle,
+  Key,
+  Lock,
 } from 'lucide-react';
 import { MiseDatabaseState } from '../lib/storage';
 import {
@@ -50,6 +56,7 @@ import {
 import { deliveryApi } from '../lib/delivery-api';
 import { DeliveryReceiptModal } from './DeliveryReceiptModal';
 import { DeliveryOrderDetailModal } from './DeliveryOrderDetailModal';
+import { DeliveryOAuthModal } from './DeliveryOAuthModal';
 import { IfoodLogo, Food99Logo, ChannelBadge } from './DeliveryLogos';
 import { SalesImport } from '../domain/types';
 
@@ -97,6 +104,42 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
   const [food99Form, setFood99Form] = useState<Partial<DeliveryChannelConfig>>({});
   const [testStatusMessage, setTestStatusMessage] = useState<{ channel: DeliveryChannel; text: string; ok: boolean } | null>(null);
   const [copiedWebhook, setCopiedWebhook] = useState<'ifood' | 'food99' | null>(null);
+  const [oauthModalChannel, setOauthModalChannel] = useState<DeliveryChannel | null>(null);
+  const [isSimulatingOrder, setIsSimulatingOrder] = useState<boolean>(false);
+
+  const handleSimulateTestOrder = async (channel: DeliveryChannel) => {
+    try {
+      setIsSimulatingOrder(true);
+      const res = await deliveryApi.simulateTestOrder(companyId, channel);
+      setSyncFeedback(`✓ ${res.message}`);
+      await loadData();
+      setActiveSubTab('orders');
+    } catch (err: any) {
+      setSyncFeedback(`Erro ao gerar pedido de teste: ${err?.message || 'Erro inesperado'}`);
+    } finally {
+      setIsSimulatingOrder(false);
+    }
+  };
+
+  const handleDisconnectOAuth = async (channel: DeliveryChannel) => {
+    const brand = channel === 'IFOOD' ? 'iFood' : '99Food';
+    if (!window.confirm(`Tem certeza que deseja desconectar o canal ${brand}? Os pedidos deste canal deixarão de sincronizar.`)) {
+      return;
+    }
+    try {
+      const res = await deliveryApi.disconnectOAuth(companyId, channel);
+      setConfigs((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [channel === 'IFOOD' ? 'ifood' : 'food99']: res.config,
+        };
+      });
+      setSyncFeedback(`Canal ${brand} desconectado com sucesso.`);
+    } catch (err: any) {
+      alert(`Erro ao desconectar: ${err?.message || 'Erro inesperado'}`);
+    }
+  };
 
   // Carregar dados iniciais
   const loadData = async () => {
@@ -477,50 +520,108 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
             </div>
           </div>
 
-          {/* Quick Channels Store Open/Closed Switches & Sync Button */}
+          {/* Quick Channels Store Open/Closed Switches & OAuth Connect Buttons */}
           <div className="flex flex-wrap items-center gap-3">
-            {/* iFood Quick Badge & Toggle */}
+            {/* iFood Quick OAuth Hub */}
             <div className="flex items-center gap-2.5 px-3 py-2 bg-red-50/70 border border-red-200/80 rounded-xl">
               <IfoodLogo size="sm" />
               <div className="flex flex-col">
-                <span className="text-[10px] font-bold tracking-wider text-red-900 uppercase">iFood</span>
+                <span className="text-[10px] font-bold tracking-wider text-red-900 uppercase flex items-center gap-1">
+                  iFood
+                  {configs?.ifood.connectionStatus === 'CONNECTED' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                  )}
+                </span>
                 <span className="text-[11px] font-semibold text-red-700">
-                  {configs?.ifood.storeOpen ? 'Loja Aberta' : 'Loja Fechada'}
+                  {configs?.ifood.connectionStatus === 'CONNECTED'
+                    ? configs.ifood.storeOpen
+                      ? 'Loja Aberta'
+                      : 'Loja Fechada'
+                    : 'Não Conectado'}
                 </span>
               </div>
-              <button
-                onClick={() => handleToggleStore('IFOOD')}
-                title="Clique para abrir ou fechar a loja no iFood"
-                className={`ml-1 text-[11px] font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors shadow-xs ${
-                  configs?.ifood.storeOpen
-                    ? 'bg-red-600 text-white hover:bg-red-700'
-                    : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
-                }`}
-              >
-                {configs?.ifood.storeOpen ? 'Aberta' : 'Fechada'}
-              </button>
+
+              {configs?.ifood.connectionStatus === 'CONNECTED' ? (
+                <div className="flex items-center gap-1.5 ml-1">
+                  <button
+                    onClick={() => handleToggleStore('IFOOD')}
+                    title="Clique para abrir ou fechar a loja no iFood"
+                    className={`text-[11px] font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors shadow-xs ${
+                      configs.ifood.storeOpen
+                        ? 'bg-red-600 text-white hover:bg-red-700'
+                        : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
+                    }`}
+                  >
+                    {configs.ifood.storeOpen ? 'Aberta' : 'Fechada'}
+                  </button>
+                  <button
+                    onClick={() => setOauthModalChannel('IFOOD')}
+                    title="Gerenciar autorização OAuth 2.0 do iFood"
+                    className="p-1 text-stone-400 hover:text-stone-700 rounded-md cursor-pointer transition-colors"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setOauthModalChannel('IFOOD')}
+                  className="ml-1 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-[#ea1d2c] hover:bg-[#d41825] text-white cursor-pointer transition-all shadow-xs flex items-center gap-1"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Conectar</span>
+                </button>
+              )}
             </div>
 
-            {/* 99Food Quick Badge & Toggle */}
+            {/* 99Food Quick OAuth Hub */}
             <div className="flex items-center gap-2.5 px-3 py-2 bg-amber-50/70 border border-amber-200/80 rounded-xl">
               <Food99Logo size="sm" />
               <div className="flex flex-col">
-                <span className="text-[10px] font-bold tracking-wider text-amber-900 uppercase">99Food</span>
+                <span className="text-[10px] font-bold tracking-wider text-amber-900 uppercase flex items-center gap-1">
+                  99Food
+                  {configs?.food99.connectionStatus === 'CONNECTED' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                  )}
+                </span>
                 <span className="text-[11px] font-semibold text-amber-800">
-                  {configs?.food99.storeOpen ? 'Loja Aberta' : 'Loja Fechada'}
+                  {configs?.food99.connectionStatus === 'CONNECTED'
+                    ? configs.food99.storeOpen
+                      ? 'Loja Aberta'
+                      : 'Loja Fechada'
+                    : 'Não Conectada'}
                 </span>
               </div>
-              <button
-                onClick={() => handleToggleStore('99FOOD')}
-                title="Clique para abrir ou fechar a loja na 99Food"
-                className={`ml-1 text-[11px] font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors shadow-xs ${
-                  configs?.food99.storeOpen
-                    ? 'bg-amber-500 text-stone-900 hover:bg-amber-600'
-                    : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
-                }`}
-              >
-                {configs?.food99.storeOpen ? 'Aberta' : 'Fechada'}
-              </button>
+
+              {configs?.food99.connectionStatus === 'CONNECTED' ? (
+                <div className="flex items-center gap-1.5 ml-1">
+                  <button
+                    onClick={() => handleToggleStore('99FOOD')}
+                    title="Clique para abrir ou fechar a loja na 99Food"
+                    className={`text-[11px] font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors shadow-xs ${
+                      configs.food99.storeOpen
+                        ? 'bg-amber-500 text-stone-900 hover:bg-amber-600'
+                        : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
+                    }`}
+                  >
+                    {configs.food99.storeOpen ? 'Aberta' : 'Fechada'}
+                  </button>
+                  <button
+                    onClick={() => setOauthModalChannel('99FOOD')}
+                    title="Gerenciar autorização OAuth 2.0 da 99Food"
+                    className="p-1 text-stone-400 hover:text-stone-700 rounded-md cursor-pointer transition-colors"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setOauthModalChannel('99FOOD')}
+                  className="ml-1 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-[#f7a800] hover:bg-[#e09800] text-stone-950 cursor-pointer transition-all shadow-xs flex items-center gap-1"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Conectar</span>
+                </button>
+              )}
             </div>
 
             {/* Sincronizar Pedidos Button */}
@@ -621,6 +722,82 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
       {/* ========================================================================= */}
       {activeSubTab === 'orders' && (
         <div className="space-y-4">
+          {/* Quick OAuth Connectivity & Simulation Banner */}
+          {(!configs?.ifood || configs.ifood.connectionStatus !== 'CONNECTED' ||
+            !configs?.food99 || configs.food99.connectionStatus !== 'CONNECTED') ? (
+            <div className="bg-gradient-to-r from-stone-900 to-stone-800 text-white rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-amber-400 text-stone-900 rounded-lg shrink-0 mt-0.5">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                    Integração Rápida via OAuth 2.0
+                  </h3>
+                  <p className="text-xs text-stone-300 mt-0.5">
+                    Conecte sua loja ao iFood ou 99Food em apenas 2 passos (Conectar → Autorizar) para receber pedidos automaticamente no KDS e na Comanda Térmica.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {configs?.ifood.connectionStatus !== 'CONNECTED' && (
+                  <button
+                    onClick={() => setOauthModalChannel('IFOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-[#ea1d2c] hover:bg-[#d41825] text-white rounded-lg cursor-pointer transition-all shadow-xs"
+                  >
+                    <IfoodLogo size="xs" />
+                    <span>Conectar iFood (OAuth)</span>
+                  </button>
+                )}
+                {configs?.food99.connectionStatus !== 'CONNECTED' && (
+                  <button
+                    onClick={() => setOauthModalChannel('99FOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-[#f7a800] hover:bg-[#e09800] text-stone-950 rounded-lg cursor-pointer transition-all shadow-xs"
+                  >
+                    <Food99Logo size="xs" />
+                    <span>Conectar 99Food (OAuth)</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-semibold">
+                  Canais Delivery Ativos via OAuth 2.0:
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px]">
+                  iFood ({configs.ifood.storeOpen ? 'Loja Aberta' : 'Fechada'})
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px]">
+                  99Food ({configs.food99.storeOpen ? 'Loja Aberta' : 'Fechada'})
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={isSimulatingOrder}
+                  onClick={() => handleSimulateTestOrder('IFOOD')}
+                  className="flex items-center gap-1 px-2.5 py-1.5 font-bold text-[11px] bg-white border border-emerald-300 hover:bg-emerald-100/50 text-emerald-800 rounded-lg cursor-pointer transition-colors shadow-2xs disabled:opacity-50"
+                  title="Gera um pedido de teste imediato para validar recebimento e impressão"
+                >
+                  <PlayCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Testar iFood</span>
+                </button>
+                <button
+                  disabled={isSimulatingOrder}
+                  onClick={() => handleSimulateTestOrder('99FOOD')}
+                  className="flex items-center gap-1 px-2.5 py-1.5 font-bold text-[11px] bg-white border border-emerald-300 hover:bg-emerald-100/50 text-emerald-800 rounded-lg cursor-pointer transition-colors shadow-2xs disabled:opacity-50"
+                  title="Gera um pedido de teste imediato para validar recebimento e impressão"
+                >
+                  <PlayCircle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Testar 99Food</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Filter Bar */}
           <div className="bg-white border border-stone-200 rounded-xl p-4 shadow-xs space-y-3">
             <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
@@ -1247,7 +1424,7 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* SUB-VIEW 3: CONFIGURAÇÃO IFOOD                                            */}
+      {/* SUB-VIEW 3: CONFIGURAÇÃO IFOOD (OAUTH 2.0 & OPERACIONAL)                   */}
       {/* ========================================================================= */}
       {activeSubTab === 'ifood' && (
         <div className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs space-y-6">
@@ -1255,24 +1432,34 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
             <div className="flex items-center gap-3">
               <IfoodLogo size="lg" />
               <div>
-                <h3 className="text-base font-bold text-stone-900">Integração iFood Merchant API</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-stone-900">Integração Oficial iFood</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800">
+                    OAuth 2.0
+                  </span>
+                </div>
                 <p className="text-xs text-stone-500">
-                  Conexão oficial com o Portal do Parceiro iFood para recepção de pedidos e sincronização de vendas.
+                  Conexão oficial com o Portal do Parceiro iFood para recebimento automático de pedidos, KDS e conciliação.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span
-                className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
                   configs?.ifood.connectionStatus === 'CONNECTED'
                     ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-amber-100 text-amber-800'
+                    : 'bg-stone-100 text-stone-700'
                 }`}
               >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    configs?.ifood.connectionStatus === 'CONNECTED' ? 'bg-emerald-500' : 'bg-stone-400'
+                  }`}
+                />
                 {configs?.ifood.connectionStatus === 'CONNECTED'
-                  ? 'Conexão Ativa'
-                  : 'Aguardando Credenciais'}
+                  ? 'OAuth 2.0 Conectado'
+                  : 'Desconectado'}
               </span>
             </div>
           </div>
@@ -1296,150 +1483,251 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
             </div>
           )}
 
-          {/* Credentials Form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">
-                Merchant UUID (ID da Loja no iFood):
-              </label>
-              <input
-                type="text"
-                value={ifoodForm.merchantId || ''}
-                onChange={(e) => setIfoodForm({ ...ifoodForm, merchantId: e.target.value })}
-                placeholder="Ex: a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-              <span className="text-[11px] text-stone-500 mt-1 block">
-                Localizado no Portal do Parceiro iFood na aba Perfil da Loja.
+          {/* OAuth 2.0 Hero Connection Card */}
+          {configs?.ifood.connectionStatus !== 'CONNECTED' ? (
+            <div className="p-6 rounded-2xl border-2 border-dashed border-red-200 bg-gradient-to-br from-red-50/60 via-white to-stone-50 space-y-5">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-[#ea1d2c] text-white rounded-lg inline-flex items-center justify-center">
+                      <Sparkles className="w-4 h-4" />
+                    </span>
+                    <h4 className="text-sm font-bold text-stone-900">
+                      Conexão em 2 Passos via OAuth 2.0 (Fácil & Rápido)
+                    </h4>
+                  </div>
+                  <p className="text-xs text-stone-600 max-w-xl leading-relaxed">
+                    Você não precisa mais lidar com chaves complexas (Client ID ou Client Secret). Basta clicar em <strong>Conectar com iFood</strong>, apertar em <strong>Autorizar Acesso</strong> na janela oficial e pronto! Sua loja estará 100% conectada.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setOauthModalChannel('IFOOD')}
+                  className="px-6 py-3 rounded-xl bg-[#ea1d2c] hover:bg-[#d41825] text-white text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Conectar com iFood via OAuth 2.0</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* 3 Step Visual Guide */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-red-100">
+                <div className="p-3 bg-white/80 rounded-xl border border-red-100 flex items-start gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-red-100 text-red-700 font-bold text-xs flex items-center justify-center shrink-0">
+                    1
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-stone-900 block">Clique em Conectar</span>
+                    <span className="text-[11px] text-stone-500">Inicia a integração oficial</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-white/80 rounded-xl border border-red-100 flex items-start gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-red-100 text-red-700 font-bold text-xs flex items-center justify-center shrink-0">
+                    2
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-stone-900 block">Aperte em Autorizar</span>
+                    <span className="text-[11px] text-stone-500">Concede permissão segura</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-white/80 rounded-xl border border-red-100 flex items-start gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xs flex items-center justify-center shrink-0">
+                    ✓
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-stone-900 block">100% Funcional</span>
+                    <span className="text-[11px] text-stone-500">Pedidos no KDS e comanda</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-2xs">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-900">
+                      Loja Conectada e Operando via OAuth 2.0
+                    </h4>
+                    <p className="text-xs text-emerald-700">
+                      Token de acesso ativo com renovação automática e sincronização contínua.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={isSimulatingOrder}
+                    onClick={() => handleSimulateTestOrder('IFOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-white hover:bg-emerald-100/50 text-emerald-800 border border-emerald-300 rounded-xl cursor-pointer transition-colors shadow-2xs disabled:opacity-50"
+                  >
+                    <PlayCircle className="w-4 h-4 text-emerald-600" />
+                    <span>Simular Pedido de Teste</span>
+                  </button>
+                  <button
+                    onClick={() => setOauthModalChannel('IFOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Reautorizar</span>
+                  </button>
+                  <button
+                    onClick={() => handleDisconnectOAuth('IFOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl cursor-pointer transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Desconectar</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Connected Details Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs pt-3 border-t border-emerald-200/60">
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Nome da Unidade:</span>
+                  <span className="font-bold text-stone-900 mt-0.5 block truncate">
+                    {configs.ifood.storeName || restaurantName}
+                  </span>
+                </div>
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Merchant UUID:</span>
+                  <span className="font-mono font-bold text-stone-900 mt-0.5 block truncate">
+                    {configs.ifood.merchantId || 'ifood-shop-matriz'}
+                  </span>
+                </div>
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Status Operacional:</span>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <span className={`font-bold ${configs.ifood.storeOpen ? 'text-emerald-700' : 'text-stone-600'}`}>
+                      {configs.ifood.storeOpen ? 'Aberta no iFood' : 'Fechada'}
+                    </span>
+                    <button
+                      onClick={() => handleToggleStore('IFOOD')}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded bg-stone-100 hover:bg-stone-200 text-stone-700 cursor-pointer"
+                    >
+                      {configs.ifood.storeOpen ? 'Fechar' : 'Abrir'}
+                    </button>
+                  </div>
+                </div>
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Token OAuth 2.0:</span>
+                  <span className="font-mono text-emerald-800 font-bold mt-0.5 block truncate">
+                    {configs.ifood.accessToken ? `${configs.ifood.accessToken.substring(0, 16)}...` : 'Ativo'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Operational Settings Accordion / Box */}
+          <div className="border border-stone-200 rounded-xl p-5 space-y-4 bg-stone-50/50">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800">
+                  Configurações Operacionais & Taxas do iFood
+                </h4>
+                <p className="text-[11px] text-stone-500">
+                  Ajuste a taxa de comissão contratual e o tempo de preparo para os cálculos de margem líquida.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  Taxa de Comissão Padrão do iFood (%):
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={ifoodForm.defaultCommissionRate ?? 23.0}
+                  onChange={(e) =>
+                    setIfoodForm({
+                      ...ifoodForm,
+                      defaultCommissionRate: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                  className="w-full p-2.5 bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
+                />
+                <span className="text-[11px] text-stone-500 mt-1 block">
+                  Normalmente 12% para Entrega Própria ou 23% a 27% para iFood Entrega Parceira.
+                </span>
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  Tempo Estimado de Preparo Padrão (minutos):
+                </label>
+                <input
+                  type="number"
+                  value={ifoodForm.defaultPrepMinutes ?? 25}
+                  onChange={(e) =>
+                    setIfoodForm({
+                      ...ifoodForm,
+                      defaultPrepMinutes: parseInt(e.target.value, 10) || 25,
+                    })
+                  }
+                  className="w-full p-2.5 bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
+                />
+                <span className="text-[11px] text-stone-500 mt-1 block">
+                  Tempo padrão sugerido ao confirmar novos pedidos recebidos.
+                </span>
+              </div>
+            </div>
+
+            {/* Webhook Endpoint Box */}
+            <div className="bg-white border border-stone-200 rounded-xl p-3.5 space-y-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-600 block">
+                URL de Webhook Oficial (Eventos Push em Tempo Real)
               </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={`${window.location.origin}/api/integrations/ifood/webhook`}
+                  className="flex-1 p-2 text-xs font-mono bg-stone-50 border border-stone-300 rounded-lg text-stone-800"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCopyWebhook('ifood')}
+                  className="flex items-center gap-1 px-3 py-2 text-xs font-bold text-stone-800 bg-stone-100 hover:bg-stone-200 border border-stone-300 rounded-lg cursor-pointer transition-colors"
+                >
+                  {copiedWebhook === 'ifood' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copiar URL</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">Nome de Exibição da Loja:</label>
-              <input
-                type="text"
-                value={ifoodForm.storeName || ''}
-                onChange={(e) => setIfoodForm({ ...ifoodForm, storeName: e.target.value })}
-                placeholder="Nome da sua loja no iFood"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">Client ID (iFood Merchant API):</label>
-              <input
-                type="text"
-                value={ifoodForm.clientId || ''}
-                onChange={(e) => setIfoodForm({ ...ifoodForm, clientId: e.target.value })}
-                placeholder="Seu Client ID do iFood Developers"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">Client Secret:</label>
-              <input
-                type="password"
-                value={ifoodForm.clientSecret || ''}
-                onChange={(e) => setIfoodForm({ ...ifoodForm, clientSecret: e.target.value })}
-                placeholder="Chave secreta da API"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">
-                Taxa de Comissão Padrão do iFood (%):
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                value={ifoodForm.defaultCommissionRate || 23.0}
-                onChange={(e) =>
-                  setIfoodForm({
-                    ...ifoodForm,
-                    defaultCommissionRate: parseFloat(e.target.value) || 0,
-                  })
-                }
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-              <span className="text-[11px] text-stone-500 mt-1 block">
-                Normalmente 12% para Entrega Própria ou 23% a 27% para iFood Entrega.
-              </span>
-            </div>
-
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">
-                Tempo Estimado de Preparo Padrão (minutos):
-              </label>
-              <input
-                type="number"
-                value={ifoodForm.defaultPrepMinutes || 25}
-                onChange={(e) =>
-                  setIfoodForm({
-                    ...ifoodForm,
-                    defaultPrepMinutes: parseInt(e.target.value, 10) || 25,
-                  })
-                }
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-            </div>
-          </div>
-
-          {/* Webhook Endpoint Box */}
-          <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">
-              URL de Webhook Oficial para o iFood
-            </h4>
-            <p className="text-xs text-stone-600">
-              Cole esta URL nas configurações de Webhook do iFood Developer Portal para receber pedidos em tempo real via push:
-            </p>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                readOnly
-                value={`${window.location.origin}/api/integrations/ifood/webhook`}
-                className="flex-1 p-2 text-xs font-mono bg-white border border-stone-300 rounded-lg text-stone-800"
-              />
+            {/* Save Button */}
+            <div className="flex justify-end pt-2 border-t border-stone-200">
               <button
-                onClick={() => handleCopyWebhook('ifood')}
-                className="flex items-center gap-1 px-3 py-2 text-xs font-bold text-stone-800 bg-white hover:bg-stone-100 border border-stone-300 rounded-lg cursor-pointer transition-colors"
+                type="button"
+                onClick={() => handleSaveConfig('IFOOD')}
+                className="px-5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 rounded-xl cursor-pointer transition-colors shadow-xs"
               >
-                {copiedWebhook === 'ifood' ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copiar URL</span>
-                  </>
-                )}
+                Salvar Configurações Operacionais
               </button>
             </div>
-          </div>
-
-          {/* Form Actions */}
-          <div className="flex flex-wrap items-center justify-between pt-4 border-t border-stone-200 gap-3">
-            <button
-              onClick={() => handleTestConnection('IFOOD')}
-              className="px-4 py-2 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-lg cursor-pointer transition-colors"
-            >
-              Testar Conexão com a API iFood
-            </button>
-            <button
-              onClick={() => handleSaveConfig('IFOOD')}
-              className="px-4 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 rounded-lg cursor-pointer transition-colors shadow-xs"
-            >
-              Salvar Configurações do iFood
-            </button>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* SUB-VIEW 4: CONFIGURAÇÃO 99FOOD                                           */}
+      {/* SUB-VIEW 4: CONFIGURAÇÃO 99FOOD (OAUTH 2.0 & OPERACIONAL)                  */}
       {/* ========================================================================= */}
       {activeSubTab === 'food99' && (
         <div className="bg-white border border-stone-200 rounded-xl p-6 shadow-xs space-y-6">
@@ -1447,24 +1735,34 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
             <div className="flex items-center gap-3">
               <Food99Logo size="lg" />
               <div>
-                <h3 className="text-base font-bold text-stone-900">Integração 99Food Open API</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-stone-900">Integração Oficial 99Food</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">
+                    OAuth 2.0
+                  </span>
+                </div>
                 <p className="text-xs text-stone-500">
-                  Conexão direta com a plataforma aberta de pedidos da 99Food para delivery e conciliação.
+                  Conexão direta com a plataforma de delivery da 99Food para recebimento de pedidos e conciliação.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span
-                className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
                   configs?.food99.connectionStatus === 'CONNECTED'
                     ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-amber-100 text-amber-800'
+                    : 'bg-stone-100 text-stone-700'
                 }`}
               >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    configs?.food99.connectionStatus === 'CONNECTED' ? 'bg-emerald-500' : 'bg-stone-400'
+                  }`}
+                />
                 {configs?.food99.connectionStatus === 'CONNECTED'
-                  ? 'Conexão Ativa'
-                  : 'Aguardando Credenciais'}
+                  ? 'OAuth 2.0 Conectado'
+                  : 'Desconectado'}
               </span>
             </div>
           </div>
@@ -1488,141 +1786,243 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
             </div>
           )}
 
-          {/* Credentials Form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
+          {/* OAuth 2.0 Hero Connection Card */}
+          {configs?.food99.connectionStatus !== 'CONNECTED' ? (
+            <div className="p-6 rounded-2xl border-2 border-dashed border-amber-200 bg-gradient-to-br from-amber-50/60 via-white to-stone-50 space-y-5">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-[#f7a800] text-stone-950 rounded-lg inline-flex items-center justify-center">
+                      <Sparkles className="w-4 h-4" />
+                    </span>
+                    <h4 className="text-sm font-bold text-stone-900">
+                      Conexão em 2 Passos via OAuth 2.0 (Fácil & Rápido)
+                    </h4>
+                  </div>
+                  <p className="text-xs text-stone-600 max-w-xl leading-relaxed">
+                    Conecte a 99Food sem precisar configurar credenciais complexas. Clique em <strong>Conectar com 99Food</strong>, aperte em <strong>Autorizar Acesso</strong> e sua unidade estará pronta para receber pedidos e imprimir comandas.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setOauthModalChannel('99FOOD')}
+                  className="px-6 py-3 rounded-xl bg-[#f7a800] hover:bg-[#e09800] text-stone-950 text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Conectar com 99Food via OAuth 2.0</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* 3 Step Visual Guide */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-amber-100">
+                <div className="p-3 bg-white/80 rounded-xl border border-amber-100 flex items-start gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-amber-100 text-amber-900 font-bold text-xs flex items-center justify-center shrink-0">
+                    1
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-stone-900 block">Clique em Conectar</span>
+                    <span className="text-[11px] text-stone-500">Inicia a conexão 99Food</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-white/80 rounded-xl border border-amber-100 flex items-start gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-amber-100 text-amber-900 font-bold text-xs flex items-center justify-center shrink-0">
+                    2
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-stone-900 block">Aperte em Autorizar</span>
+                    <span className="text-[11px] text-stone-500">Autoriza o app Mise</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-white/80 rounded-xl border border-amber-100 flex items-start gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xs flex items-center justify-center shrink-0">
+                    ✓
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-stone-900 block">100% Funcional</span>
+                    <span className="text-[11px] text-stone-500">Pedidos no KDS e repasse</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-2xs">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-900">
+                      Loja Conectada e Operando via OAuth 2.0
+                    </h4>
+                    <p className="text-xs text-emerald-700">
+                      Integração ativa para sincronização de pedidos e comissões da 99Food.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={isSimulatingOrder}
+                    onClick={() => handleSimulateTestOrder('99FOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-white hover:bg-emerald-100/50 text-emerald-800 border border-emerald-300 rounded-xl cursor-pointer transition-colors shadow-2xs disabled:opacity-50"
+                  >
+                    <PlayCircle className="w-4 h-4 text-amber-600" />
+                    <span>Simular Pedido de Teste</span>
+                  </button>
+                  <button
+                    onClick={() => setOauthModalChannel('99FOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-stone-950 rounded-xl cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Reautorizar</span>
+                  </button>
+                  <button
+                    onClick={() => handleDisconnectOAuth('99FOOD')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl cursor-pointer transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Desconectar</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Connected Details Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs pt-3 border-t border-emerald-200/60">
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Nome da Unidade:</span>
+                  <span className="font-bold text-stone-900 mt-0.5 block truncate">
+                    {configs.food99.storeName || restaurantName}
+                  </span>
+                </div>
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Shop ID:</span>
+                  <span className="font-mono font-bold text-stone-900 mt-0.5 block truncate">
+                    {configs.food99.merchantId || '99food-shop-matriz'}
+                  </span>
+                </div>
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Status Operacional:</span>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <span className={`font-bold ${configs.food99.storeOpen ? 'text-emerald-700' : 'text-stone-600'}`}>
+                      {configs.food99.storeOpen ? 'Aberta na 99Food' : 'Fechada'}
+                    </span>
+                    <button
+                      onClick={() => handleToggleStore('99FOOD')}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded bg-stone-100 hover:bg-stone-200 text-stone-700 cursor-pointer"
+                    >
+                      {configs.food99.storeOpen ? 'Fechar' : 'Abrir'}
+                    </button>
+                  </div>
+                </div>
+                <div className="p-3 bg-white/90 rounded-xl border border-emerald-100">
+                  <span className="text-[11px] text-stone-500 block font-medium">Token OAuth 2.0:</span>
+                  <span className="font-mono text-emerald-800 font-bold mt-0.5 block truncate">
+                    {configs.food99.accessToken ? `${configs.food99.accessToken.substring(0, 16)}...` : 'Ativo'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Operational Settings Accordion / Box */}
+          <div className="border border-stone-200 rounded-xl p-5 space-y-4 bg-stone-50/50">
             <div>
-              <label className="font-bold text-stone-700 block mb-1">
-                Shop ID / ID da Loja na 99Food:
-              </label>
-              <input
-                type="text"
-                value={food99Form.merchantId || ''}
-                onChange={(e) => setFood99Form({ ...food99Form, merchantId: e.target.value })}
-                placeholder="Ex: 99food_shop_sp_0019"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800">
+                Configurações Operacionais & Taxas da 99Food
+              </h4>
+              <p className="text-[11px] text-stone-500">
+                Ajuste a comissão e o tempo padrão para a gestão e precificação no Mise.
+              </p>
             </div>
 
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">Nome da Loja na 99Food:</label>
-              <input
-                type="text"
-                value={food99Form.storeName || ''}
-                onChange={(e) => setFood99Form({ ...food99Form, storeName: e.target.value })}
-                placeholder="Nome da loja"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  Taxa de Comissão Padrão 99Food (%):
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={food99Form.defaultCommissionRate ?? 15.0}
+                  onChange={(e) =>
+                    setFood99Form({
+                      ...food99Form,
+                      defaultCommissionRate: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                  className="w-full p-2.5 bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
+                />
+                <span className="text-[11px] text-stone-500 mt-1 block">
+                  Geralmente de 12% a 15% para Entrega Própria e 20% a 25% para Entrega 99.
+                </span>
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  Tempo Estimado de Preparo Padrão (minutos):
+                </label>
+                <input
+                  type="number"
+                  value={food99Form.defaultPrepMinutes ?? 20}
+                  onChange={(e) =>
+                    setFood99Form({
+                      ...food99Form,
+                      defaultPrepMinutes: parseInt(e.target.value, 10) || 20,
+                    })
+                  }
+                  className="w-full p-2.5 bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
+                />
+                <span className="text-[11px] text-stone-500 mt-1 block">
+                  Tempo padrão estimado de produção ao receber pedidos.
+                </span>
+              </div>
             </div>
 
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">App ID (99Food Open API):</label>
-              <input
-                type="text"
-                value={food99Form.appId || ''}
-                onChange={(e) => setFood99Form({ ...food99Form, appId: e.target.value })}
-                placeholder="App ID fornecido pela 99Food"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">App Secret:</label>
-              <input
-                type="password"
-                value={food99Form.appSecret || ''}
-                onChange={(e) => setFood99Form({ ...food99Form, appSecret: e.target.value })}
-                placeholder="Chave secreta de autenticação"
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">
-                Taxa de Comissão Padrão 99Food (%):
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                value={food99Form.defaultCommissionRate || 15.0}
-                onChange={(e) =>
-                  setFood99Form({
-                    ...food99Form,
-                    defaultCommissionRate: parseFloat(e.target.value) || 0,
-                  })
-                }
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-              <span className="text-[11px] text-stone-500 mt-1 block">
-                Geralmente de 12% a 15% para Entrega Própria e 20% a 25% para Entrega 99.
+            {/* Webhook Endpoint Box */}
+            <div className="bg-white border border-stone-200 rounded-xl p-3.5 space-y-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-600 block">
+                URL de Webhook Oficial (Eventos Push em Tempo Real)
               </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={`${window.location.origin}/api/integrations/99food/webhook`}
+                  className="flex-1 p-2 text-xs font-mono bg-stone-50 border border-stone-300 rounded-lg text-stone-800"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCopyWebhook('food99')}
+                  className="flex items-center gap-1 px-3 py-2 text-xs font-bold text-stone-800 bg-stone-100 hover:bg-stone-200 border border-stone-300 rounded-lg cursor-pointer transition-colors"
+                >
+                  {copiedWebhook === 'food99' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copiar URL</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
-            <div>
-              <label className="font-bold text-stone-700 block mb-1">
-                Tempo Estimado de Preparo Padrão (minutos):
-              </label>
-              <input
-                type="number"
-                value={food99Form.defaultPrepMinutes || 20}
-                onChange={(e) =>
-                  setFood99Form({
-                    ...food99Form,
-                    defaultPrepMinutes: parseInt(e.target.value, 10) || 20,
-                  })
-                }
-                className="w-full p-2.5 border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-stone-900"
-              />
-            </div>
-          </div>
-
-          {/* Webhook Endpoint Box */}
-          <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">
-              URL de Webhook para a 99Food
-            </h4>
-            <p className="text-xs text-stone-600">
-              Configure esta URL no portal de integração da 99Food para escutar atualizações de status de pedidos:
-            </p>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                readOnly
-                value={`${window.location.origin}/api/integrations/99food/webhook`}
-                className="flex-1 p-2 text-xs font-mono bg-white border border-stone-300 rounded-lg text-stone-800"
-              />
+            {/* Save Button */}
+            <div className="flex justify-end pt-2 border-t border-stone-200">
               <button
-                onClick={() => handleCopyWebhook('food99')}
-                className="flex items-center gap-1 px-3 py-2 text-xs font-bold text-stone-800 bg-white hover:bg-stone-100 border border-stone-300 rounded-lg cursor-pointer transition-colors"
+                type="button"
+                onClick={() => handleSaveConfig('99FOOD')}
+                className="px-5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 rounded-xl cursor-pointer transition-colors shadow-xs"
               >
-                {copiedWebhook === 'food99' ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copiar URL</span>
-                  </>
-                )}
+                Salvar Configurações Operacionais
               </button>
             </div>
-          </div>
-
-          {/* Form Actions */}
-          <div className="flex flex-wrap items-center justify-between pt-4 border-t border-stone-200 gap-3">
-            <button
-              onClick={() => handleTestConnection('99FOOD')}
-              className="px-4 py-2 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-lg cursor-pointer transition-colors"
-            >
-              Testar Conexão com a 99Food
-            </button>
-            <button
-              onClick={() => handleSaveConfig('99FOOD')}
-              className="px-4 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 rounded-lg cursor-pointer transition-colors shadow-xs"
-            >
-              Salvar Configurações da 99Food
-            </button>
           </div>
         </div>
       )}
@@ -1645,6 +2045,31 @@ export const IntegracoesTab: React.FC<IntegracoesTabProps> = ({
           order={selectedOrderForPrint}
           restaurantName={restaurantName}
           onClose={() => setSelectedOrderForPrint(null)}
+        />
+      )}
+
+      {/* Modal de Conexão Rápida OAuth 2.0 */}
+      {oauthModalChannel && (
+        <DeliveryOAuthModal
+          channel={oauthModalChannel}
+          companyId={companyId}
+          defaultStoreName={restaurantName}
+          currentConfig={configs ? configs[oauthModalChannel === 'IFOOD' ? 'ifood' : 'food99'] : undefined}
+          isOpen={true}
+          onClose={() => setOauthModalChannel(null)}
+          onSuccess={(updatedConfig) => {
+            setConfigs((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                [oauthModalChannel === 'IFOOD' ? 'ifood' : 'food99']: updatedConfig,
+              };
+            });
+            setSyncFeedback(
+              `✓ ${oauthModalChannel === 'IFOOD' ? 'iFood' : '99Food'} conectado com 100% de sucesso via OAuth 2.0!`
+            );
+            loadData();
+          }}
         />
       )}
     </div>

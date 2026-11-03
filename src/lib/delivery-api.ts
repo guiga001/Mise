@@ -186,6 +186,19 @@ class DeliveryApiClient {
     );
   }
 
+  public async simulateTestOrder(
+    companyId: string,
+    channel: DeliveryChannel
+  ): Promise<{ success: boolean; message: string; order: DeliveryOrder }> {
+    return this.request<{ success: boolean; message: string; order: DeliveryOrder }>(
+      '/api/integrations/simulate-test-order',
+      {
+        method: 'POST',
+        body: JSON.stringify({ companyId, channel }),
+      }
+    );
+  }
+
   public async getMetrics(companyId: string, period: string = 'today'): Promise<DeliveryMetricsSummary> {
     const data = await this.request<{ success: boolean; metrics: DeliveryMetricsSummary }>(
       `/api/integrations/metrics?companyId=${encodeURIComponent(companyId)}&period=${encodeURIComponent(

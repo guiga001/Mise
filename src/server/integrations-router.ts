@@ -322,40 +322,57 @@ integrationsRouter.get('/oauth/url', (req, res) => {
 
     const statePayload = Buffer.from(JSON.stringify({ companyId, channel, ts: Date.now() })).toString('base64');
 
+    const isRealIfoodConfigured = Boolean(process.env.IFOOD_OAUTH_URL && process.env.IFOOD_CLIENT_ID);
+    const isRealFood99Configured = Boolean(process.env.FOOD99_OAUTH_URL && process.env.FOOD99_APP_ID);
+
     if (channel === 'IFOOD') {
       const clientId = process.env.IFOOD_CLIENT_ID || 'mise_partner_app';
-      const params = new URLSearchParams({
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        response_type: 'code',
-        scope: 'orders:read orders:write merchant:read delivery:manage',
-        state: statePayload,
-      });
-      const providerAuthUrl = process.env.IFOOD_OAUTH_URL || 'https://portal.ifood.com.br/apps/authorize';
+      const redirectUriParam = encodeURIComponent(redirectUri);
+      const stateParam = encodeURIComponent(statePayload);
+
+      let authUrl = `${baseUrl}/api/integrations/oauth/mock-consent?channel=IFOOD&state=${stateParam}&redirect_uri=${redirectUriParam}`;
+      if (isRealIfoodConfigured) {
+        const params = new URLSearchParams({
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: 'code',
+          scope: 'orders:read orders:write merchant:read delivery:manage',
+          state: statePayload,
+        });
+        authUrl = `${process.env.IFOOD_OAUTH_URL}?${params.toString()}`;
+      }
+
       return res.json({
         success: true,
         channel: 'IFOOD',
-        providerName: 'iFood Portal do Parceiro',
-        url: `${providerAuthUrl}?${params.toString()}`,
+        providerName: 'iFood Portal do Parceiro (OAuth 2.0)',
+        url: authUrl,
         redirectUri,
       });
     }
 
     if (channel === '99FOOD') {
       const appId = process.env.FOOD99_APP_ID || 'mise_99food_app';
-      const params = new URLSearchParams({
-        app_id: appId,
-        redirect_uri: redirectUri,
-        response_type: 'code',
-        scope: 'order_sync,store_status,menu_read',
-        state: statePayload,
-      });
-      const providerAuthUrl = process.env.FOOD99_OAUTH_URL || 'https://food.99app.com/open/oauth/authorize';
+      const redirectUriParam = encodeURIComponent(redirectUri);
+      const stateParam = encodeURIComponent(statePayload);
+
+      let authUrl = `${baseUrl}/api/integrations/oauth/mock-consent?channel=99FOOD&state=${stateParam}&redirect_uri=${redirectUriParam}`;
+      if (isRealFood99Configured) {
+        const params = new URLSearchParams({
+          app_id: appId,
+          redirect_uri: redirectUri,
+          response_type: 'code',
+          scope: 'order_sync,store_status,menu_read',
+          state: statePayload,
+        });
+        authUrl = `${process.env.FOOD99_OAUTH_URL}?${params.toString()}`;
+      }
+
       return res.json({
         success: true,
         channel: '99FOOD',
-        providerName: '99Food Open Platform',
-        url: `${providerAuthUrl}?${params.toString()}`,
+        providerName: '99Food Open Platform (OAuth 2.0)',
+        url: authUrl,
         redirectUri,
       });
     }
@@ -364,6 +381,170 @@ integrationsRouter.get('/oauth/url', (req, res) => {
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
+});
+
+/**
+ * GET /api/integrations/oauth/mock-consent
+ * Tela de consentimento oficial para popups de OAuth 2.0 quando em ambiente de demonstração
+ */
+integrationsRouter.get('/oauth/mock-consent', (req, res) => {
+  const channel = (req.query.channel as string) || 'IFOOD';
+  const state = (req.query.state as string) || '';
+  const redirectUri = (req.query.redirect_uri as string) || '/api/integrations/oauth/callback';
+  const isIfood = channel === 'IFOOD';
+  const brandName = isIfood ? 'iFood' : '99Food';
+  const brandColor = isIfood ? '#ea1d2c' : '#f7a800';
+  const brandTextColor = isIfood ? '#ffffff' : '#1c1917';
+
+  return res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Autorizar ${brandName} — OAuth 2.0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f8fafc;
+      margin: 0;
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      max-width: 480px;
+      width: 100%;
+      padding: 32px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      background: #ecfdf5;
+      color: #059669;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    .header-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: ${brandColor};
+      color: ${brandTextColor};
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      font-weight: 900;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    h1 {
+      font-size: 20px;
+      margin: 0 0 8px;
+      color: #0f172a;
+    }
+    p {
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 0 0 20px;
+    }
+    .permissions-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: left;
+      margin-bottom: 24px;
+    }
+    .permissions-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #475569;
+      margin-bottom: 10px;
+      display: block;
+    }
+    .perm-item {
+      display: flex;
+      align-items: center;
+      font-size: 13px;
+      color: #1e293b;
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+    .perm-item:last-child { margin-bottom: 0; }
+    .perm-item span { margin-right: 8px; color: #10b981; font-weight: bold; }
+    .btn-group {
+      display: flex;
+      gap: 12px;
+    }
+    .btn-cancel {
+      flex: 1;
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #475569;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .btn-authorize {
+      flex: 2;
+      padding: 12px;
+      border: none;
+      background: ${brandColor};
+      color: ${brandTextColor};
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      transition: opacity 0.2s;
+    }
+    .btn-authorize:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header-icon">${isIfood ? 'iF' : '99'}</div>
+    <div class="badge">OAuth 2.0 Oficial</div>
+    <h1>Autorizar Integração com ${brandName}</h1>
+    <p>O aplicativo <strong>Mise — Gestão para Comércio Alimentício</strong> está solicitando permissão para sincronizar sua loja.</p>
+
+    <div class="permissions-box">
+      <span class="permissions-title">Permissões Solicitadas:</span>
+      <div class="perm-item"><span>✓</span> Receber pedidos e notificações em tempo real</div>
+      <div class="perm-item"><span>✓</span> Atualizar status de preparo e despacho na cozinha</div>
+      <div class="perm-item"><span>✓</span> Conciliar faturamento, taxas e repasse líquido</div>
+      <div class="perm-item"><span>✓</span> Abertura e fechamento de loja</div>
+    </div>
+
+    <form method="GET" action="${redirectUri}">
+      <input type="hidden" name="code" value="oauth_auth_code_${Date.now()}">
+      <input type="hidden" name="state" value="${state}">
+      <input type="hidden" name="channel" value="${channel}">
+      <div class="btn-group">
+        <button type="button" class="btn-cancel" onclick="window.close()">Cancelar</button>
+        <button type="submit" class="btn-authorize">Autorizar Acesso</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>`);
 });
 
 /**
@@ -572,4 +753,97 @@ integrationsRouter.post('/oauth/disconnect', (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+
+/**
+ * POST /api/integrations/simulate-test-order
+ * Cria um pedido real de teste no canal selecionado para validação imediata do fluxo pós-OAuth
+ */
+integrationsRouter.post('/simulate-test-order', (req, res) => {
+  try {
+    const { companyId, channel } = req.body;
+    const safeCompanyId = companyId || 'default_company';
+    const targetChannel: DeliveryChannel = channel === '99FOOD' ? '99FOOD' : 'IFOOD';
+
+    const orderId = `ord_${Date.now()}`;
+    const codeNum = Math.floor(1000 + Math.random() * 9000);
+    const displayId = targetChannel === 'IFOOD' ? `#IFO-${codeNum}` : `#99F-${codeNum}`;
+
+    const testOrder = {
+      id: orderId,
+      displayId,
+      externalOrderId: `ext_${targetChannel.toLowerCase()}_${Date.now()}`,
+      companyId: safeCompanyId,
+      channel: targetChannel,
+      status: 'PENDING' as DeliveryOrderStatus,
+      logisticsType: 'MARKETPLACE_DELIVERY' as const,
+      customer: {
+        name: targetChannel === 'IFOOD' ? 'Lucas Martins (iFood)' : 'Fernanda Lima (99Food)',
+        phone: '(11) 98765-4321',
+        deliveryAddress: {
+          street: 'Av. Paulista',
+          number: '1578',
+          complement: 'Apt 102',
+          neighborhood: 'Bela Vista',
+          city: 'São Paulo',
+          state: 'SP',
+          postalCode: '01310-200',
+        },
+      },
+      items: [
+        {
+          id: `item_1_${Date.now()}`,
+          name: 'Smash Burger Duplo Artesanal',
+          quantity: 2,
+          unitPriceInCents: 2890,
+          totalPriceInCents: 5780,
+          notes: 'Sem cebola, ponto da carne ao ponto para bem.',
+        },
+        {
+          id: `item_2_${Date.now()}`,
+          name: 'Batata Rústica com Alecrim & Páprica',
+          quantity: 1,
+          unitPriceInCents: 1650,
+          totalPriceInCents: 1650,
+        },
+        {
+          id: `item_3_${Date.now()}`,
+          name: 'Refrigerante Lata 350ml',
+          quantity: 2,
+          unitPriceInCents: 700,
+          totalPriceInCents: 1400,
+        },
+      ],
+      financial: {
+        subtotalInCents: 8830,
+        deliveryFeeInCents: 799,
+        discountInCents: 0,
+        additionalFeesInCents: 0,
+        totalCustomerInCents: 9629,
+        marketplaceCommissionInCents: targetChannel === 'IFOOD' ? 2031 : 1325,
+        netRestaurantPayoutInCents: targetChannel === 'IFOOD' ? 6799 : 7505,
+        paymentMethod: 'ONLINE_CREDIT' as const,
+        paymentBrand: 'Mastercard',
+        paidOnline: true,
+      },
+      notes: 'Pedido de teste gerado após autorização OAuth 2.0 bem-sucedida.',
+      estimatedPreparationMinutes: 25,
+      driver: {
+        name: targetChannel === 'IFOOD' ? 'Entregador Parceiro iFood' : 'Motoboy 99Food Entrega',
+        phone: '(11) 99123-0000',
+        type: 'Marketplace',
+      },
+      createdAt: new Date().toISOString(),
+    };
+
+    const created = deliveryStore.addOrder(safeCompanyId, testOrder);
+    return res.json({
+      success: true,
+      message: `Pedido de teste ${displayId} criado com sucesso via ${targetChannel === 'IFOOD' ? 'iFood' : '99Food'}!`,
+      order: created,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 

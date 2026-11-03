@@ -63,7 +63,33 @@ export const DeliveryOAuthModal: React.FC<DeliveryOAuthModalProps> = ({
   const brandBgLight = isIfood ? 'bg-red-50' : 'bg-amber-50';
   const brandBorder = isIfood ? 'border-red-200' : 'border-amber-200';
 
-  // Autorização Rápida em 1-clique
+  // Escuta mensagem de sucesso do popup caso o usuário use a janela externa
+  React.useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        const msgChannel = event.data.channel || channel;
+        if (msgChannel === channel) {
+          setSuccessStep(true);
+          try {
+            const fetchedConfigs = await deliveryApi.getConfigs(companyId);
+            const updated = channel === 'IFOOD' ? fetchedConfigs.ifood : fetchedConfigs.food99;
+            setTimeout(() => {
+              onSuccess(updated);
+              onClose();
+            }, 1000);
+          } catch {
+            setTimeout(() => {
+              onClose();
+            }, 1000);
+          }
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [channel, companyId, onSuccess, onClose]);
+
+  // Autorização Rápida em 1-clique (Conectar -> Autorizar -> 100% Funcional)
   const handleAuthorizeDirect = async () => {
     try {
       setIsAuthorizing(true);
@@ -299,11 +325,12 @@ export const DeliveryOAuthModal: React.FC<DeliveryOAuthModalProps> = ({
                 {isAuthorizing ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Autorizando OAuth...</span>
+                    <span>Conectando via OAuth 2.0...</span>
                   </>
                 ) : (
                   <>
-                    <span>Autorizar Acesso</span>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Autorizar e Conectar com {brandName}</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
