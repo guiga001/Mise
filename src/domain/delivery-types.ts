@@ -123,6 +123,12 @@ export interface DeliveryChannelConfig {
   webhookSecret?: string;
   lastSyncAt?: string;
   environment: 'PRODUCTION' | 'SANDBOX';
+  authType?: 'OAUTH2' | 'API_KEY';
+  accessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: string;
+  authorizedAt?: string;
+  authorizedBy?: string;
 }
 
 export interface DeliveryMetricsSummary {

@@ -149,6 +149,43 @@ class DeliveryApiClient {
     });
   }
 
+  public async getOAuthUrl(
+    companyId: string,
+    channel: DeliveryChannel
+  ): Promise<{ success: boolean; url: string; redirectUri: string; providerName: string }> {
+    return this.request<{ success: boolean; url: string; redirectUri: string; providerName: string }>(
+      `/api/integrations/oauth/url?companyId=${encodeURIComponent(companyId)}&channel=${encodeURIComponent(channel)}`
+    );
+  }
+
+  public async authorizeDirect(
+    companyId: string,
+    channel: DeliveryChannel,
+    storeName?: string,
+    merchantId?: string
+  ): Promise<{ success: boolean; message: string; config: DeliveryChannelConfig }> {
+    return this.request<{ success: boolean; message: string; config: DeliveryChannelConfig }>(
+      '/api/integrations/oauth/authorize-direct',
+      {
+        method: 'POST',
+        body: JSON.stringify({ companyId, channel, storeName, merchantId }),
+      }
+    );
+  }
+
+  public async disconnectOAuth(
+    companyId: string,
+    channel: DeliveryChannel
+  ): Promise<{ success: boolean; message: string; config: DeliveryChannelConfig }> {
+    return this.request<{ success: boolean; message: string; config: DeliveryChannelConfig }>(
+      '/api/integrations/oauth/disconnect',
+      {
+        method: 'POST',
+        body: JSON.stringify({ companyId, channel }),
+      }
+    );
+  }
+
   public async getMetrics(companyId: string, period: string = 'today'): Promise<DeliveryMetricsSummary> {
     const data = await this.request<{ success: boolean; metrics: DeliveryMetricsSummary }>(
       `/api/integrations/metrics?companyId=${encodeURIComponent(companyId)}&period=${encodeURIComponent(

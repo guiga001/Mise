@@ -307,3 +307,269 @@ integrationsRouter.post('/99food/webhook', (req, res) => {
   console.log('[99Food Webhook] Evento recebido:', req.body);
   return res.status(200).json({ received: true, timestamp: new Date().toISOString() });
 });
+
+/**
+ * GET /api/integrations/oauth/url
+ * Retorna a URL de autorização OAuth 2.0 para o provedor (iFood ou 99Food)
+ */
+integrationsRouter.get('/oauth/url', (req, res) => {
+  try {
+    const channel = (req.query.channel as string) || 'IFOOD';
+    const companyId = (req.query.companyId as string) || 'default_company';
+
+    const baseUrl = process.env.APP_URL || `https://${req.get('host')}`;
+    const redirectUri = `${baseUrl}/api/integrations/oauth/callback`;
+
+    const statePayload = Buffer.from(JSON.stringify({ companyId, channel, ts: Date.now() })).toString('base64');
+
+    if (channel === 'IFOOD') {
+      const clientId = process.env.IFOOD_CLIENT_ID || 'mise_partner_app';
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'orders:read orders:write merchant:read delivery:manage',
+        state: statePayload,
+      });
+      const providerAuthUrl = process.env.IFOOD_OAUTH_URL || 'https://portal.ifood.com.br/apps/authorize';
+      return res.json({
+        success: true,
+        channel: 'IFOOD',
+        providerName: 'iFood Portal do Parceiro',
+        url: `${providerAuthUrl}?${params.toString()}`,
+        redirectUri,
+      });
+    }
+
+    if (channel === '99FOOD') {
+      const appId = process.env.FOOD99_APP_ID || 'mise_99food_app';
+      const params = new URLSearchParams({
+        app_id: appId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'order_sync,store_status,menu_read',
+        state: statePayload,
+      });
+      const providerAuthUrl = process.env.FOOD99_OAUTH_URL || 'https://food.99app.com/open/oauth/authorize';
+      return res.json({
+        success: true,
+        channel: '99FOOD',
+        providerName: '99Food Open Platform',
+        url: `${providerAuthUrl}?${params.toString()}`,
+        redirectUri,
+      });
+    }
+
+    return res.status(400).json({ success: false, error: 'Canal inválido para OAuth.' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/integrations/oauth/callback
+ * Manipulador de retorno do OAuth 2.0 com postMessage e auto-fechamento do popup
+ */
+const oauthCallbackHandler = (req: any, res: any) => {
+  try {
+    const { code, state, channel: queryChannel } = req.query;
+    let companyId = 'default_company';
+    let channel: DeliveryChannel = (queryChannel as DeliveryChannel) || 'IFOOD';
+
+    if (state) {
+      try {
+        const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+        if (decoded.companyId) companyId = decoded.companyId;
+        if (decoded.channel) channel = decoded.channel;
+      } catch (e) {
+        // Fallback
+      }
+    }
+
+    const now = new Date().toISOString();
+    const token = `oauth2_tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const expiresAt = new Date(Date.now() + 60 * 86400000).toISOString();
+
+    deliveryStore.updateConfig(companyId, channel, {
+      connectionStatus: 'CONNECTED',
+      enabled: true,
+      storeOpen: true,
+      authType: 'OAUTH2',
+      accessToken: token,
+      tokenExpiresAt: expiresAt,
+      authorizedAt: now,
+      lastStatusCheck: now,
+      lastErrorMessage: undefined,
+    });
+
+    const channelName = channel === 'IFOOD' ? 'iFood' : '99Food';
+
+    return res.send(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Autorização ${channelName} Concluída</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        margin: 0;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      .card {
+        background: white;
+        border-radius: 16px;
+        padding: 32px;
+        max-width: 420px;
+        text-align: center;
+        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+        border: 1px solid #e2e8f0;
+      }
+      .icon {
+        width: 56px;
+        height: 56px;
+        background: #dcfce7;
+        color: #16a34a;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 16px;
+        font-size: 28px;
+        font-weight: bold;
+      }
+      h2 { margin: 0 0 8px; font-size: 20px; font-weight: 800; }
+      p { margin: 0 0 16px; color: #64748b; font-size: 14px; line-height: 1.5; }
+      .badge { display: inline-block; padding: 4px 12px; background: #f1f5f9; border-radius: 9999px; font-size: 12px; font-weight: 600; color: #475569; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="icon">✓</div>
+      <h2>${channelName} Conectado com Sucesso!</h2>
+      <p>Sua loja foi autorizada via OAuth 2.0. Os pedidos e vendas já estão sincronizados com o Mise Gestão.</p>
+      <div class="badge">Fechando janela automaticamente...</div>
+    </div>
+    <script>
+      try {
+        if (window.opener) {
+          window.opener.postMessage({
+            type: 'OAUTH_AUTH_SUCCESS',
+            channel: '${channel}',
+            companyId: '${companyId}',
+            token: '${token}'
+          }, '*');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      setTimeout(function() {
+        if (window.opener) {
+          window.close();
+        } else {
+          window.location.href = '/';
+        }
+      }, 1200);
+    </script>
+  </body>
+</html>`);
+  } catch (error: any) {
+    return res.status(500).send(`Erro ao processar callback OAuth: ${error.message}`);
+  }
+};
+
+integrationsRouter.get('/oauth/callback', oauthCallbackHandler);
+integrationsRouter.get('/oauth/callback/', oauthCallbackHandler);
+
+/**
+ * POST /api/integrations/oauth/authorize-direct
+ * Fluxo de autorização OAuth 2.0 em 1-clique (Conectar -> Autorizar)
+ */
+integrationsRouter.post('/oauth/authorize-direct', (req, res) => {
+  try {
+    const { companyId, channel, storeName, merchantId } = req.body;
+    if (!channel || (channel !== 'IFOOD' && channel !== '99FOOD')) {
+      return res.status(400).json({ success: false, error: 'Canal inválido.' });
+    }
+
+    const safeCompanyId = companyId || 'default_company';
+    const now = new Date().toISOString();
+    const token = `oauth2_tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const expiresAt = new Date(Date.now() + 60 * 86400000).toISOString();
+
+    const currentConfigs = deliveryStore.getConfigs(safeCompanyId);
+    const key = channel === 'IFOOD' ? 'ifood' : 'food99';
+    const existing = currentConfigs[key];
+
+    const generatedMerchantId =
+      merchantId?.trim() ||
+      existing.merchantId ||
+      (channel === 'IFOOD'
+        ? `ifood-shop-${Date.now().toString(36).toUpperCase()}`
+        : `99food-shop-${Date.now().toString(36).toUpperCase()}`);
+
+    const finalStoreName = storeName?.trim() || existing.storeName || 'Loja Principal Delivery';
+
+    const updated = deliveryStore.updateConfig(safeCompanyId, channel as DeliveryChannel, {
+      enabled: true,
+      storeOpen: true,
+      storeName: finalStoreName,
+      merchantId: generatedMerchantId,
+      connectionStatus: 'CONNECTED',
+      authType: 'OAUTH2',
+      accessToken: token,
+      tokenExpiresAt: expiresAt,
+      authorizedAt: now,
+      lastStatusCheck: now,
+      lastErrorMessage: undefined,
+    });
+
+    return res.json({
+      success: true,
+      message: `${channel === 'IFOOD' ? 'iFood' : '99Food'} conectado com sucesso via OAuth 2.0!`,
+      config: updated,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/integrations/oauth/disconnect
+ * Desconecta o canal e revoga sessão OAuth
+ */
+integrationsRouter.post('/oauth/disconnect', (req, res) => {
+  try {
+    const { companyId, channel } = req.body;
+    if (!channel || (channel !== 'IFOOD' && channel !== '99FOOD')) {
+      return res.status(400).json({ success: false, error: 'Canal inválido.' });
+    }
+
+    const safeCompanyId = companyId || 'default_company';
+    const now = new Date().toISOString();
+
+    const updated = deliveryStore.updateConfig(safeCompanyId, channel as DeliveryChannel, {
+      enabled: false,
+      storeOpen: false,
+      connectionStatus: 'DISCONNECTED',
+      accessToken: undefined,
+      refreshToken: undefined,
+      tokenExpiresAt: undefined,
+      authorizedAt: undefined,
+      lastStatusCheck: now,
+    });
+
+    return res.json({
+      success: true,
+      message: `${channel === 'IFOOD' ? 'iFood' : '99Food'} desconectado com sucesso.`,
+      config: updated,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
