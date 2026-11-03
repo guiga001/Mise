@@ -152,18 +152,30 @@ class DeliveryStore {
 
   public updateConfig(
     companyId: string,
-    channel: DeliveryChannel,
+    channel: DeliveryChannel | string,
     patch: Partial<DeliveryChannelConfig>
   ): DeliveryChannelConfig {
     const data = this.load(companyId);
-    const key = channel === 'IFOOD' ? 'ifood' : 'food99';
-    data.configs[key] = {
-      ...data.configs[key],
+    const normalizedKey =
+      String(channel).toUpperCase() === '99FOOD' || String(channel).toUpperCase().includes('99')
+        ? 'food99'
+        : 'ifood';
+    const targetChannel: DeliveryChannel = normalizedKey === 'food99' ? '99FOOD' : 'IFOOD';
+
+    if (!data.configs) {
+      data.configs = createDefaultData(companyId).configs;
+    }
+    if (!data.configs[normalizedKey]) {
+      data.configs[normalizedKey] = createDefaultData(companyId).configs[normalizedKey];
+    }
+
+    data.configs[normalizedKey] = {
+      ...data.configs[normalizedKey],
       ...patch,
-      channel,
+      channel: targetChannel,
     };
     this.save(data);
-    return data.configs[key];
+    return data.configs[normalizedKey];
   }
 
   public toggleStoreStatus(companyId: string, channel: DeliveryChannel, storeOpen: boolean): DeliveryChannelConfig {

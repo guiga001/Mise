@@ -8,6 +8,14 @@ import { Router } from 'express';
 import { deliveryStore } from './delivery-store';
 import { DeliveryChannel, DeliveryOrderStatus, DeliveryFilterOptions } from '../domain/delivery-types';
 
+export function normalizeChannel(ch: any): DeliveryChannel | null {
+  if (!ch || typeof ch !== 'string') return null;
+  const upper = ch.trim().toUpperCase();
+  if (upper === 'IFOOD' || upper === 'FOODI') return 'IFOOD';
+  if (upper === '99FOOD' || upper === 'FOOD99' || upper === '99') return '99FOOD';
+  return null;
+}
+
 export const integrationsRouter = Router();
 
 /**
@@ -30,12 +38,13 @@ integrationsRouter.get('/configs', (req, res) => {
  */
 integrationsRouter.post('/configs', (req, res) => {
   try {
-    const { companyId, channel, ...patch } = req.body;
-    if (!channel || (channel !== 'IFOOD' && channel !== '99FOOD')) {
+    const { companyId, channel: rawChannel, ...patch } = req.body;
+    const channel = normalizeChannel(rawChannel);
+    if (!channel) {
       return res.status(400).json({ success: false, error: 'Canal inválido. Utilize IFOOD ou 99FOOD.' });
     }
     const safeCompanyId = companyId || 'default_company';
-    const updated = deliveryStore.updateConfig(safeCompanyId, channel as DeliveryChannel, patch);
+    const updated = deliveryStore.updateConfig(safeCompanyId, channel, patch);
     return res.json({ success: true, config: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -48,12 +57,13 @@ integrationsRouter.post('/configs', (req, res) => {
  */
 integrationsRouter.post('/toggle-store', (req, res) => {
   try {
-    const { companyId, channel, storeOpen } = req.body;
-    if (!channel || (channel !== 'IFOOD' && channel !== '99FOOD')) {
+    const { companyId, channel: rawChannel, storeOpen } = req.body;
+    const channel = normalizeChannel(rawChannel);
+    if (!channel) {
       return res.status(400).json({ success: false, error: 'Canal inválido.' });
     }
     const safeCompanyId = companyId || 'default_company';
-    const updated = deliveryStore.toggleStoreStatus(safeCompanyId, channel as DeliveryChannel, Boolean(storeOpen));
+    const updated = deliveryStore.toggleStoreStatus(safeCompanyId, channel, Boolean(storeOpen));
     return res.json({
       success: true,
       storeOpen: updated.storeOpen,
@@ -72,7 +82,11 @@ integrationsRouter.post('/toggle-store', (req, res) => {
  */
 integrationsRouter.post('/test-connection', async (req, res) => {
   try {
-    const { companyId, channel, credentials } = req.body;
+    const { companyId, channel: rawChannel, credentials } = req.body;
+    const channel = normalizeChannel(rawChannel);
+    if (!channel) {
+      return res.status(400).json({ success: false, error: 'Canal inválido. Utilize IFOOD ou 99FOOD.' });
+    }
     const safeCompanyId = companyId || 'default_company';
 
     if (channel === 'IFOOD') {
@@ -314,11 +328,17 @@ integrationsRouter.post('/99food/webhook', (req, res) => {
  */
 integrationsRouter.get('/oauth/url', (req, res) => {
   try {
-    const channel = (req.query.channel as string) || 'IFOOD';
+    const rawChannel = (req.query.channel as string) || 'IFOOD';
+    const channel = normalizeChannel(rawChannel) || 'IFOOD';
     const companyId = (req.query.companyId as string) || 'default_company';
 
-    const baseUrl = process.env.APP_URL || `https://${req.get('host')}`;
-    const redirectUri = `${baseUrl}/api/integrations/oauth/callback`;
+    const clientOrigin =
+      (req.query.origin as string) ||
+      (req.get('origin') as string) ||
+      (req.get('referer') ? new URL(req.get('referer')!).origin : undefined);
+    const baseUrl = clientOrigin || process.env.APP_URL || `https://${req.get('host')}`;
+    const clientRedirect = (req.query.redirect_uri as string) || (req.query.redirectUri as string);
+    const redirectUri = clientRedirect || `${baseUrl}/api/integrations/oauth/callback`;
 
     const statePayload = Buffer.from(JSON.stringify({ companyId, channel, ts: Date.now() })).toString('base64');
 
@@ -551,17 +571,29 @@ integrationsRouter.get('/oauth/mock-consent', (req, res) => {
  * GET /api/integrations/oauth/callback
  * Manipulador de retorno do OAuth 2.0 com postMessage e auto-fechamento do popup
  */
-const oauthCallbackHandler = (req: any, res: any) => {
+/**
+ * GET /api/integrations/oauth/callback
+ * Manipulador de retorno do OAuth 2.0 com postMessage e auto-fechamento do popup
+ */
+export const oauthCallbackHandler = (req: any, res: any) => {
   try {
     const { code, state, channel: queryChannel } = req.query;
     let companyId = 'default_company';
-    let channel: DeliveryChannel = (queryChannel as DeliveryChannel) || 'IFOOD';
+    let channel: DeliveryChannel = 'IFOOD';
+
+    if (queryChannel) {
+      const norm = normalizeChannel(queryChannel);
+      if (norm) channel = norm;
+    }
 
     if (state) {
       try {
         const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
         if (decoded.companyId) companyId = decoded.companyId;
-        if (decoded.channel) channel = decoded.channel;
+        if (decoded.channel) {
+          const norm = normalizeChannel(decoded.channel);
+          if (norm) channel = norm;
+        }
       } catch (e) {
         // Fallback
       }
@@ -571,10 +603,24 @@ const oauthCallbackHandler = (req: any, res: any) => {
     const token = `oauth2_tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const expiresAt = new Date(Date.now() + 60 * 86400000).toISOString();
 
+    const currentConfigs = deliveryStore.getConfigs(companyId);
+    const key = channel === 'IFOOD' ? 'ifood' : 'food99';
+    const existing = currentConfigs?.[key] || ({} as any);
+
+    const generatedMerchantId =
+      existing.merchantId ||
+      (channel === 'IFOOD'
+        ? `ifood-shop-${Date.now().toString(36).toUpperCase()}`
+        : `99food-shop-${Date.now().toString(36).toUpperCase()}`);
+
+    const finalStoreName = existing.storeName || (channel === 'IFOOD' ? 'Loja iFood Principal' : 'Loja 99Food Principal');
+
     deliveryStore.updateConfig(companyId, channel, {
       connectionStatus: 'CONNECTED',
       enabled: true,
       storeOpen: true,
+      storeName: finalStoreName,
+      merchantId: generatedMerchantId,
       authType: 'OAUTH2',
       accessToken: token,
       tokenExpiresAt: expiresAt,
@@ -605,7 +651,7 @@ const oauthCallbackHandler = (req: any, res: any) => {
         background: white;
         border-radius: 16px;
         padding: 32px;
-        max-width: 420px;
+        max-width: 440px;
         text-align: center;
         box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
         border: 1px solid #e2e8f0;
@@ -625,7 +671,19 @@ const oauthCallbackHandler = (req: any, res: any) => {
       }
       h2 { margin: 0 0 8px; font-size: 20px; font-weight: 800; }
       p { margin: 0 0 16px; color: #64748b; font-size: 14px; line-height: 1.5; }
-      .badge { display: inline-block; padding: 4px 12px; background: #f1f5f9; border-radius: 9999px; font-size: 12px; font-weight: 600; color: #475569; }
+      .badge { display: inline-block; padding: 6px 14px; background: #f1f5f9; border-radius: 9999px; font-size: 12px; font-weight: 600; color: #475569; }
+      .btn-close {
+        display: inline-block;
+        margin-top: 12px;
+        padding: 10px 20px;
+        background: #0f172a;
+        color: #ffffff;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        cursor: pointer;
+        text-decoration: none;
+      }
     </style>
   </head>
   <body>
@@ -633,7 +691,10 @@ const oauthCallbackHandler = (req: any, res: any) => {
       <div class="icon">✓</div>
       <h2>${channelName} Conectado com Sucesso!</h2>
       <p>Sua loja foi autorizada via OAuth 2.0. Os pedidos e vendas já estão sincronizados com o Mise Gestão.</p>
-      <div class="badge">Fechando janela automaticamente...</div>
+      <div class="badge">Sessão validada e ativa</div>
+      <div style="margin-top: 16px;">
+        <button class="btn-close" onclick="window.close()">Concluir e Fechar</button>
+      </div>
     </div>
     <script>
       try {
@@ -651,10 +712,8 @@ const oauthCallbackHandler = (req: any, res: any) => {
       setTimeout(function() {
         if (window.opener) {
           window.close();
-        } else {
-          window.location.href = '/';
         }
-      }, 1200);
+      }, 1500);
     </script>
   </body>
 </html>`);
@@ -663,8 +722,7 @@ const oauthCallbackHandler = (req: any, res: any) => {
   }
 };
 
-integrationsRouter.get('/oauth/callback', oauthCallbackHandler);
-integrationsRouter.get('/oauth/callback/', oauthCallbackHandler);
+integrationsRouter.get(['/oauth/callback', '/oauth/callback/'], oauthCallbackHandler);
 
 /**
  * POST /api/integrations/oauth/authorize-direct
@@ -672,9 +730,10 @@ integrationsRouter.get('/oauth/callback/', oauthCallbackHandler);
  */
 integrationsRouter.post('/oauth/authorize-direct', (req, res) => {
   try {
-    const { companyId, channel, storeName, merchantId } = req.body;
-    if (!channel || (channel !== 'IFOOD' && channel !== '99FOOD')) {
-      return res.status(400).json({ success: false, error: 'Canal inválido.' });
+    const { companyId, channel: rawChannel, storeName, merchantId } = req.body;
+    const channel = normalizeChannel(rawChannel);
+    if (!channel) {
+      return res.status(400).json({ success: false, error: 'Canal inválido. Utilize IFOOD ou 99FOOD.' });
     }
 
     const safeCompanyId = companyId || 'default_company';
@@ -684,7 +743,7 @@ integrationsRouter.post('/oauth/authorize-direct', (req, res) => {
 
     const currentConfigs = deliveryStore.getConfigs(safeCompanyId);
     const key = channel === 'IFOOD' ? 'ifood' : 'food99';
-    const existing = currentConfigs[key];
+    const existing = currentConfigs?.[key] || ({} as any);
 
     const generatedMerchantId =
       merchantId?.trim() ||
@@ -693,9 +752,10 @@ integrationsRouter.post('/oauth/authorize-direct', (req, res) => {
         ? `ifood-shop-${Date.now().toString(36).toUpperCase()}`
         : `99food-shop-${Date.now().toString(36).toUpperCase()}`);
 
-    const finalStoreName = storeName?.trim() || existing.storeName || 'Loja Principal Delivery';
+    const finalStoreName =
+      storeName?.trim() || existing.storeName || (channel === 'IFOOD' ? 'Loja iFood Delivery' : 'Loja 99Food Delivery');
 
-    const updated = deliveryStore.updateConfig(safeCompanyId, channel as DeliveryChannel, {
+    const updated = deliveryStore.updateConfig(safeCompanyId, channel, {
       enabled: true,
       storeOpen: true,
       storeName: finalStoreName,
@@ -725,15 +785,16 @@ integrationsRouter.post('/oauth/authorize-direct', (req, res) => {
  */
 integrationsRouter.post('/oauth/disconnect', (req, res) => {
   try {
-    const { companyId, channel } = req.body;
-    if (!channel || (channel !== 'IFOOD' && channel !== '99FOOD')) {
-      return res.status(400).json({ success: false, error: 'Canal inválido.' });
+    const { companyId, channel: rawChannel } = req.body;
+    const channel = normalizeChannel(rawChannel);
+    if (!channel) {
+      return res.status(400).json({ success: false, error: 'Canal inválido. Utilize IFOOD ou 99FOOD.' });
     }
 
     const safeCompanyId = companyId || 'default_company';
     const now = new Date().toISOString();
 
-    const updated = deliveryStore.updateConfig(safeCompanyId, channel as DeliveryChannel, {
+    const updated = deliveryStore.updateConfig(safeCompanyId, channel, {
       enabled: false,
       storeOpen: false,
       connectionStatus: 'DISCONNECTED',
@@ -742,6 +803,7 @@ integrationsRouter.post('/oauth/disconnect', (req, res) => {
       tokenExpiresAt: undefined,
       authorizedAt: undefined,
       lastStatusCheck: now,
+      lastErrorMessage: undefined,
     });
 
     return res.json({
@@ -760,9 +822,13 @@ integrationsRouter.post('/oauth/disconnect', (req, res) => {
  */
 integrationsRouter.post('/simulate-test-order', (req, res) => {
   try {
-    const { companyId, channel } = req.body;
+    const { companyId, channel: rawChannel } = req.body;
+    const channel = normalizeChannel(rawChannel);
+    if (!channel) {
+      return res.status(400).json({ success: false, error: 'Canal inválido. Utilize IFOOD ou 99FOOD.' });
+    }
     const safeCompanyId = companyId || 'default_company';
-    const targetChannel: DeliveryChannel = channel === '99FOOD' ? '99FOOD' : 'IFOOD';
+    const targetChannel: DeliveryChannel = channel;
 
     const orderId = `ord_${Date.now()}`;
     const codeNum = Math.floor(1000 + Math.random() * 9000);

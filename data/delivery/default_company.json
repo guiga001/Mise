@@ -1,0 +1,44 @@
+{
+  "companyId": "default_company",
+  "configs": {
+    "ifood": {
+      "channel": "IFOOD",
+      "enabled": true,
+      "storeOpen": true,
+      "storeName": "Loja Teste",
+      "merchantId": "ifood-shop-MW0XII8Y",
+      "clientId": "",
+      "clientSecret": "",
+      "defaultCommissionRate": 23,
+      "autoAcceptOrders": false,
+      "defaultPrepMinutes": 25,
+      "autoPrintReceipt": true,
+      "connectionStatus": "CONNECTED",
+      "lastStatusCheck": "2026-11-03T17:09:29.204Z",
+      "webhookUrl": "/api/integrations/ifood/webhook",
+      "environment": "PRODUCTION",
+      "authType": "OAUTH2",
+      "accessToken": "oauth2_tok_1793725769204_7ypwkdf",
+      "tokenExpiresAt": "2027-01-02T17:09:29.204Z",
+      "authorizedAt": "2026-11-03T17:09:29.204Z"
+    },
+    "food99": {
+      "channel": "99FOOD",
+      "enabled": false,
+      "storeOpen": false,
+      "storeName": "",
+      "merchantId": "",
+      "appId": "",
+      "appSecret": "",
+      "defaultCommissionRate": 15,
+      "autoAcceptOrders": false,
+      "defaultPrepMinutes": 20,
+      "autoPrintReceipt": true,
+      "connectionStatus": "DISCONNECTED",
+      "lastStatusCheck": "2026-11-03T16:55:35.650Z",
+      "webhookUrl": "/api/integrations/99food/webhook",
+      "environment": "PRODUCTION"
+    }
+  },
+  "orders": []
+}

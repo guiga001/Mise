@@ -9,7 +9,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { atendimentoRouter } from './src/server/atendimento-router';
-import { integrationsRouter } from './src/server/integrations-router';
+import { integrationsRouter, oauthCallbackHandler } from './src/server/integrations-router';
 
 async function startServer() {
   const app = express();
@@ -21,6 +21,14 @@ async function startServer() {
 
   // Rotas de Integrações de Delivery (iFood e 99Food)
   app.use('/api/integrations', integrationsRouter);
+
+  // Rotas de OAuth 2.0 diretas (para compatibilidade com provedores e popups)
+  app.get(['/auth/callback', '/auth/callback/'], oauthCallbackHandler);
+  app.get(['/api/auth/callback', '/api/auth/callback/'], oauthCallbackHandler);
+  app.get('/api/auth/url', (req, res) => {
+    const params = new URLSearchParams(req.query as Record<string, string>);
+    res.redirect(`/api/integrations/oauth/url?${params.toString()}`);
+  });
 
   // Rotas legadas da API de Atendimento
   app.use('/api/atendimento', atendimentoRouter);

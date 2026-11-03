@@ -15,19 +15,27 @@ import {
 
 class DeliveryApiClient {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const res = await fetch(endpoint, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
-    });
+    try {
+      const res = await fetch(endpoint, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      });
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `Erro na requisição ${endpoint}: status ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message = data.error || data.message || `Erro na requisição ${endpoint}: status ${res.status}`;
+        throw new Error(message);
+      }
+      return data as T;
+    } catch (err: any) {
+      if (err.name === 'TypeError' && err.message?.includes('fetch')) {
+        throw new Error('Falha de conexão com o servidor local. Verifique sua conexão.');
+      }
+      throw err;
     }
-    return data as T;
   }
 
   public async getConfigs(
@@ -153,8 +161,11 @@ class DeliveryApiClient {
     companyId: string,
     channel: DeliveryChannel
   ): Promise<{ success: boolean; url: string; redirectUri: string; providerName: string }> {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const redirectParam = origin ? `&redirect_uri=${encodeURIComponent(origin + '/auth/callback')}&origin=${encodeURIComponent(origin)}` : '';
+    const safeChannel = channel === '99FOOD' ? '99FOOD' : 'IFOOD';
     return this.request<{ success: boolean; url: string; redirectUri: string; providerName: string }>(
-      `/api/integrations/oauth/url?companyId=${encodeURIComponent(companyId)}&channel=${encodeURIComponent(channel)}`
+      `/api/integrations/oauth/url?companyId=${encodeURIComponent(companyId)}&channel=${encodeURIComponent(safeChannel)}${redirectParam}`
     );
   }
 
@@ -164,11 +175,12 @@ class DeliveryApiClient {
     storeName?: string,
     merchantId?: string
   ): Promise<{ success: boolean; message: string; config: DeliveryChannelConfig }> {
+    const safeChannel = channel === '99FOOD' ? '99FOOD' : 'IFOOD';
     return this.request<{ success: boolean; message: string; config: DeliveryChannelConfig }>(
       '/api/integrations/oauth/authorize-direct',
       {
         method: 'POST',
-        body: JSON.stringify({ companyId, channel, storeName, merchantId }),
+        body: JSON.stringify({ companyId, channel: safeChannel, storeName, merchantId }),
       }
     );
   }

@@ -3,40 +3,181 @@
   "configs": {
     "ifood": {
       "channel": "IFOOD",
-      "enabled": false,
-      "storeOpen": false,
-      "storeName": "",
-      "merchantId": "",
+      "enabled": true,
+      "storeOpen": true,
+      "storeName": "Restaurante Central",
+      "merchantId": "ifood-shop-MW0XNEMI",
       "clientId": "",
       "clientSecret": "",
       "defaultCommissionRate": 23,
       "autoAcceptOrders": false,
       "defaultPrepMinutes": 25,
       "autoPrintReceipt": true,
-      "connectionStatus": "DISCONNECTED",
-      "lastStatusCheck": "2026-11-03T10:45:54.244Z",
+      "connectionStatus": "CONNECTED",
+      "lastStatusCheck": "2026-11-03T17:09:22.545Z",
       "webhookUrl": "/api/integrations/ifood/webhook",
       "environment": "PRODUCTION",
-      "lastSyncAt": "2026-11-03T10:45:59.057Z"
+      "lastSyncAt": "2026-11-03T10:45:59.057Z",
+      "authType": "OAUTH2",
+      "accessToken": "oauth2_tok_1793725762545_22m3tye",
+      "tokenExpiresAt": "2027-01-02T17:09:22.545Z",
+      "authorizedAt": "2026-11-03T17:09:22.545Z"
     },
     "food99": {
       "channel": "99FOOD",
-      "enabled": false,
-      "storeOpen": false,
-      "storeName": "",
-      "merchantId": "",
+      "enabled": true,
+      "storeOpen": true,
+      "storeName": "Restaurante Central 99",
+      "merchantId": "99food-shop-MW0Y0AVK",
       "appId": "",
       "appSecret": "",
       "defaultCommissionRate": 15,
       "autoAcceptOrders": false,
       "defaultPrepMinutes": 20,
       "autoPrintReceipt": true,
-      "connectionStatus": "DISCONNECTED",
-      "lastStatusCheck": "2026-11-03T10:45:54.244Z",
+      "connectionStatus": "CONNECTED",
+      "lastStatusCheck": "2026-11-03T17:09:25.904Z",
       "webhookUrl": "/api/integrations/99food/webhook",
       "environment": "PRODUCTION",
-      "lastSyncAt": "2026-11-03T10:45:59.057Z"
+      "lastSyncAt": "2026-11-03T10:45:59.057Z",
+      "authType": "OAUTH2",
+      "accessToken": "oauth2_tok_1793725765904_h8n6cm7",
+      "tokenExpiresAt": "2027-01-02T17:09:25.904Z",
+      "authorizedAt": "2026-11-03T17:09:25.904Z"
     }
   },
-  "orders": []
+  "orders": [
+    {
+      "id": "ord_1793725782201",
+      "displayId": "#99F-7258",
+      "externalOrderId": "ext_99food_1793725782201",
+      "companyId": "comp_1793638954937_jobe2",
+      "channel": "99FOOD",
+      "status": "PENDING",
+      "logisticsType": "MARKETPLACE_DELIVERY",
+      "customer": {
+        "name": "Fernanda Lima (99Food)",
+        "phone": "(11) 98765-4321",
+        "deliveryAddress": {
+          "street": "Av. Paulista",
+          "number": "1578",
+          "complement": "Apt 102",
+          "neighborhood": "Bela Vista",
+          "city": "São Paulo",
+          "state": "SP",
+          "postalCode": "01310-200"
+        }
+      },
+      "items": [
+        {
+          "id": "item_1_1793725782201",
+          "name": "Smash Burger Duplo Artesanal",
+          "quantity": 2,
+          "unitPriceInCents": 2890,
+          "totalPriceInCents": 5780,
+          "notes": "Sem cebola, ponto da carne ao ponto para bem."
+        },
+        {
+          "id": "item_2_1793725782201",
+          "name": "Batata Rústica com Alecrim & Páprica",
+          "quantity": 1,
+          "unitPriceInCents": 1650,
+          "totalPriceInCents": 1650
+        },
+        {
+          "id": "item_3_1793725782201",
+          "name": "Refrigerante Lata 350ml",
+          "quantity": 2,
+          "unitPriceInCents": 700,
+          "totalPriceInCents": 1400
+        }
+      ],
+      "financial": {
+        "subtotalInCents": 8830,
+        "deliveryFeeInCents": 799,
+        "discountInCents": 0,
+        "additionalFeesInCents": 0,
+        "totalCustomerInCents": 9629,
+        "marketplaceCommissionInCents": 1325,
+        "netRestaurantPayoutInCents": 7505,
+        "paymentMethod": "ONLINE_CREDIT",
+        "paymentBrand": "Mastercard",
+        "paidOnline": true
+      },
+      "notes": "Pedido de teste gerado após autorização OAuth 2.0 bem-sucedida.",
+      "estimatedPreparationMinutes": 25,
+      "driver": {
+        "name": "Motoboy 99Food Entrega",
+        "phone": "(11) 99123-0000",
+        "type": "Marketplace"
+      },
+      "createdAt": "2026-11-03T17:09:42.201Z"
+    },
+    {
+      "id": "ord_1793725779203",
+      "displayId": "#IFO-2561",
+      "externalOrderId": "ext_ifood_1793725779203",
+      "companyId": "comp_1793638954937_jobe2",
+      "channel": "IFOOD",
+      "status": "PENDING",
+      "logisticsType": "MARKETPLACE_DELIVERY",
+      "customer": {
+        "name": "Lucas Martins (iFood)",
+        "phone": "(11) 98765-4321",
+        "deliveryAddress": {
+          "street": "Av. Paulista",
+          "number": "1578",
+          "complement": "Apt 102",
+          "neighborhood": "Bela Vista",
+          "city": "São Paulo",
+          "state": "SP",
+          "postalCode": "01310-200"
+        }
+      },
+      "items": [
+        {
+          "id": "item_1_1793725779203",
+          "name": "Smash Burger Duplo Artesanal",
+          "quantity": 2,
+          "unitPriceInCents": 2890,
+          "totalPriceInCents": 5780,
+          "notes": "Sem cebola, ponto da carne ao ponto para bem."
+        },
+        {
+          "id": "item_2_1793725779203",
+          "name": "Batata Rústica com Alecrim & Páprica",
+          "quantity": 1,
+          "unitPriceInCents": 1650,
+          "totalPriceInCents": 1650
+        },
+        {
+          "id": "item_3_1793725779203",
+          "name": "Refrigerante Lata 350ml",
+          "quantity": 2,
+          "unitPriceInCents": 700,
+          "totalPriceInCents": 1400
+        }
+      ],
+      "financial": {
+        "subtotalInCents": 8830,
+        "deliveryFeeInCents": 799,
+        "discountInCents": 0,
+        "additionalFeesInCents": 0,
+        "totalCustomerInCents": 9629,
+        "marketplaceCommissionInCents": 2031,
+        "netRestaurantPayoutInCents": 6799,
+        "paymentMethod": "ONLINE_CREDIT",
+        "paymentBrand": "Mastercard",
+        "paidOnline": true
+      },
+      "notes": "Pedido de teste gerado após autorização OAuth 2.0 bem-sucedida.",
+      "estimatedPreparationMinutes": 25,
+      "driver": {
+        "name": "Entregador Parceiro iFood",
+        "phone": "(11) 99123-0000",
+        "type": "Marketplace"
+      },
+      "createdAt": "2026-11-03T17:09:39.203Z"
+    }
+  ]
 }
